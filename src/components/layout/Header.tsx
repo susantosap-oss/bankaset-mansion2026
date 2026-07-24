@@ -35,7 +35,7 @@ export function Header({ user, title }: HeaderProps) {
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => signOut({ callbackUrl: '/' })}
+              onClick={() => signOut({ redirectTo: window.location.origin + '/' })}
             >
               <LogOut className="w-4 h-4" />
             </Button>
