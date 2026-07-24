@@ -3,7 +3,7 @@ steps:
     args:
       - build
       - -t
-      - asia-southeast2-docker.pkg.dev/$PROJECT_ID/bankaset/app:$COMMIT_SHA
+      - asia-southeast2-docker.pkg.dev/$PROJECT_ID/bankaset/app:$BUILD_ID
       - -t
       - asia-southeast2-docker.pkg.dev/$PROJECT_ID/bankaset/app:latest
       - .
@@ -20,7 +20,7 @@ steps:
       - run
       - deploy
       - bankaset-mansion2026
-      - --image=asia-southeast2-docker.pkg.dev/$PROJECT_ID/bankaset/app:$COMMIT_SHA
+      - --image=asia-southeast2-docker.pkg.dev/$PROJECT_ID/bankaset/app:$BUILD_ID
       - --region=asia-southeast2
       - --platform=managed
       - --allow-unauthenticated
@@ -32,6 +32,3 @@ steps:
 
 options:
   logging: CLOUD_LOGGING_ONLY
-
-substitutions:
-  _REGION: asia-southeast2
