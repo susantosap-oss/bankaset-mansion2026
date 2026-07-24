@@ -35,7 +35,7 @@ export function Header({ user, title }: HeaderProps) {
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => signOut({ redirectTo: window.location.origin + '/' })}
+              onClick={async () => { await signOut({ redirect: false }); window.location.href = '/login'; }}
             >
               <LogOut className="w-4 h-4" />
             </Button>
