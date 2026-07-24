@@ -21,14 +21,15 @@ const NAV_ITEMS = [
 
 interface SidebarProps {
   isAuthenticated: boolean;
+  onNavigate?: () => void;
 }
 
-export function Sidebar({ isAuthenticated }: SidebarProps) {
+export function Sidebar({ isAuthenticated, onNavigate }: SidebarProps) {
   const pathname = usePathname();
   const visibleItems = NAV_ITEMS.filter((i) => i.public || isAuthenticated);
 
   return (
-    <aside className="w-60 min-h-screen bg-gray-900 flex flex-col">
+    <aside className="w-60 h-full min-h-screen bg-gray-900 flex flex-col">
       {/* Logo */}
       <div className="px-6 py-5 border-b border-gray-700">
         <p className="text-white font-bold text-lg leading-tight">Mansion</p>
@@ -43,6 +44,7 @@ export function Sidebar({ isAuthenticated }: SidebarProps) {
             <Link
               key={item.href}
               href={item.href}
+              onClick={onNavigate}
               className={cn(
                 'flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors',
                 active

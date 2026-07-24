@@ -98,7 +98,7 @@ export default function AssetsPage() {
   }
 
   return (
-    <div className="p-6 space-y-5">
+    <div className="p-4 md:p-6 space-y-4 md:space-y-5">
       {aiAsset && <AIAnalysisPanel asset={aiAsset} onClose={() => setAiAsset(null)} />}
       <div className="flex items-center justify-between">
         <div>
@@ -129,7 +129,7 @@ export default function AssetsPage() {
 
       {/* Filters */}
       <form onSubmit={(e) => { e.preventDefault(); setPage(1); fetchAssets(); }}
-        className="flex flex-wrap gap-3">
+        className="flex flex-wrap gap-2 md:gap-3">
         <div className="relative flex-1 min-w-[200px]">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
           <input
