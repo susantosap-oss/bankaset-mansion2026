@@ -274,7 +274,7 @@ export class GoogleSheetAssetRepository implements IAssetRepository {
       'Alamat Lengkap', 'Nilai Pasar', 'Outstanding', 'Sisa Pokok',
       'Luas Tanah (m²)', 'Luas Bangunan (m²)', 'Debitur',
       'Rasio Sisa Pokok/Outstanding', 'Nilai Likuidasi',
-      'Harga_Pasar_Est (Rp/m²)', 'Sellable', 'Status',
+      'Harga_Pasar_Est (Rp/m²)', 'Demand Score (AI)', 'Sellable', 'Status',
       'Dibuat', 'Diperbarui',
     ];
 
@@ -284,13 +284,14 @@ export class GoogleSheetAssetRepository implements IAssetRepository {
         const cityKey = getCityKey(a.city);
         const entry = areaMap?.get(cityKey);
         const hargaPasarEst = entry?.medianPrice && entry.medianPrice > 0 ? entry.medianPrice : '';
+        const demandScore = entry?.demandScore ?? '';
         const sellable = isSellable(a, entry) ? 'Ya' : 'Tidak';
         return [
           a.assetId, a.bankName, a.assetType, a.city, a.district, a.area,
           a.address, a.marketValue, a.outstanding, a.principalOutstanding ?? '',
           a.landArea, a.buildingArea, a.debtorName ?? '',
           a.liquidationRatio ?? '', a.liquidationValue ?? '',
-          hargaPasarEst, sellable,
+          hargaPasarEst, demandScore, sellable,
           a.status, a.createdAt, a.updatedAt,
         ];
       }),

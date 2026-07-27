@@ -13,6 +13,7 @@ import type { Asset } from '@/domain/entities/Asset';
 
 interface AssetEnriched extends Asset {
   marketPriceEst?: number | null;
+  demandScore?: number | null;
   sellable?: boolean;
 }
 
@@ -186,6 +187,7 @@ export default function AssetsPage() {
                   <th className="text-right px-3 py-2 font-medium text-gray-500 whitespace-nowrap">Rasio</th>
                   <th className="text-right px-3 py-2 font-medium text-gray-500 whitespace-nowrap">Likuidasi</th>
                   <th className="text-right px-3 py-2 font-medium text-gray-500 whitespace-nowrap">Harga Pasar Est</th>
+                  <th className="text-center px-3 py-2 font-medium text-gray-500 whitespace-nowrap">Demand</th>
                   <th className="text-center px-3 py-2 font-medium text-gray-500 whitespace-nowrap">Sellable</th>
                   <th className="text-center px-3 py-2 font-medium text-gray-500 whitespace-nowrap">Status</th>
                   <th className="px-2 py-2"></th>
@@ -225,6 +227,15 @@ export default function AssetsPage() {
                       {asset.marketPriceEst && asset.marketPriceEst > 0
                         ? `Rp ${(asset.marketPriceEst / 1_000_000).toFixed(0)}jt/m²`
                         : '—'}
+                    </td>
+                    <td className="px-3 py-2 text-center whitespace-nowrap">
+                      {asset.demandScore != null
+                        ? <span className={`inline-block px-1.5 py-0.5 rounded font-semibold text-xs ${
+                            asset.demandScore >= 70 ? 'bg-emerald-100 text-emerald-700' :
+                            asset.demandScore >= 40 ? 'bg-amber-100 text-amber-700' :
+                            'bg-red-100 text-red-700'
+                          }`}>{asset.demandScore}</span>
+                        : <span className="text-gray-400">—</span>}
                     </td>
                     <td className="px-3 py-2 text-center whitespace-nowrap">
                       {asset.sellable

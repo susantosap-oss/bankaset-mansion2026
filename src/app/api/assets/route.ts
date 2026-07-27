@@ -55,13 +55,14 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    // Enrichment: tambahkan marketPriceEst & sellable ke setiap asset
+    // Enrichment: tambahkan marketPriceEst, demandScore & sellable ke setiap asset
     const enriched = result.data.map((asset) => {
       const cityKey = canonicalize(asset.city).toLowerCase();
       const areaEntry = cityAreaMap.get(cityKey);
       return {
         ...asset,
         marketPriceEst: areaEntry?.medianPrice ?? null,
+        demandScore: areaEntry?.demandScore ?? null,
         sellable: isSellable(asset, areaEntry),
       };
     });
