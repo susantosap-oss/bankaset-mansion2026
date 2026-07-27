@@ -114,6 +114,10 @@ export function AIAnalysisPanel({ asset, onClose }: Props) {
               <span className="text-gray-400">Outstanding</span>
               <p className="font-semibold text-gray-800">{asset.outstanding ? formatCurrency(asset.outstanding) : '—'}</p>
             </div>
+            <div>
+              <span className="text-gray-400">Sisa Pokok</span>
+              <p className="font-semibold text-gray-800">{asset.principalOutstanding ? formatCurrency(asset.principalOutstanding) : '—'}</p>
+            </div>
             {asset.landArea > 0 && (
               <div>
                 <span className="text-gray-400">Luas Tanah</span>
