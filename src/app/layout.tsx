@@ -5,10 +5,14 @@ import './globals.css';
 const geist = Geist({ subsets: ['latin'] });
 
 export const metadata: Metadata = {
-  title: 'Mansion Asset Bank Intelligence',
+  title: 'AssetB Mansion',
   description: 'Platform manajemen asset bank lelang untuk broker properti Mansion',
   manifest: '/manifest.json',
-  appleWebApp: { capable: true, statusBarStyle: 'default', title: 'Mansion ABI' },
+  appleWebApp: { capable: true, statusBarStyle: 'default', title: 'AssetB Mansion' },
+  icons: {
+    icon: '/favicon.ico',
+    apple: '/icons/apple-touch-icon.png',
+  },
 };
 
 export const viewport: Viewport = {
