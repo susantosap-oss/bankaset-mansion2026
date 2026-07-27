@@ -13,12 +13,13 @@ import { Grade } from '@/domain/value-objects/Grade';
 
 const SHEET_NAME = 'Asset Engine';
 
-// Column order in the sheet (cols 0–14 existing, 15–18 extended)
+// Column order in the sheet (cols 0–14 existing, 15–19 extended)
 const COLS = [
   'assetId', 'bankName', 'assetType', 'city', 'district', 'area',
   'address', 'marketValue', 'outstanding', 'landArea', 'buildingArea',
   'status', 'createdAt', 'updatedAt', 'rawRowRef',
   'debtorName', 'principalOutstanding', 'liquidationRatio', 'liquidationValue',
+  'certificateType',
 ] as const;
 
 function rowToAsset(row: string[]): Asset | null {
@@ -43,6 +44,7 @@ function rowToAsset(row: string[]): Asset | null {
     principalOutstanding: row[16] ? parseFloat(row[16]) || undefined : undefined,
     liquidationRatio: row[17] ? parseFloat(row[17]) || undefined : undefined,
     liquidationValue: row[18] ? parseFloat(row[18]) || undefined : undefined,
+    certificateType: row[19] || undefined,
   };
 }
 
@@ -56,6 +58,7 @@ function assetToRow(asset: Asset): string[] {
     asset.principalOutstanding != null ? String(asset.principalOutstanding) : '',
     asset.liquidationRatio != null ? String(asset.liquidationRatio) : '',
     asset.liquidationValue != null ? String(asset.liquidationValue) : '',
+    asset.certificateType ?? '',
   ];
 }
 
@@ -272,7 +275,7 @@ export class GoogleSheetAssetRepository implements IAssetRepository {
     const HEADER = [
       'Asset ID', 'Bank', 'Tipe Aset', 'Kota', 'Kecamatan', 'Area/Kelurahan',
       'Alamat Lengkap', 'Nilai Pasar', 'Outstanding', 'Sisa Pokok',
-      'Luas Tanah (m²)', 'Luas Bangunan (m²)', 'Debitur',
+      'LT (m²)', 'LB (m²)', 'Tipe Sertifikat', 'Debitur',
       'Rasio Sisa Pokok/Outstanding', 'Nilai Likuidasi',
       'Harga_Pasar_Est (Rp/m²)', 'Demand Score (AI)', 'Sellable', 'Status',
       'Dibuat', 'Diperbarui',
@@ -289,7 +292,10 @@ export class GoogleSheetAssetRepository implements IAssetRepository {
         return [
           a.assetId, a.bankName, a.assetType, a.city, a.district, a.area,
           a.address, a.marketValue, a.outstanding, a.principalOutstanding ?? '',
-          a.landArea, a.buildingArea, a.debtorName ?? '',
+          a.landArea > 0 ? a.landArea : '-',
+          a.buildingArea > 0 ? a.buildingArea : '-',
+          a.certificateType || '-',
+          a.debtorName ?? '-',
           a.liquidationRatio ?? '', a.liquidationValue ?? '',
           hargaPasarEst, demandScore, sellable,
           a.status, a.createdAt, a.updatedAt,

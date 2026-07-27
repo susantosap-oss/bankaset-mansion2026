@@ -186,6 +186,9 @@ export default function AssetsPage() {
                   <th className="text-right px-3 py-2 font-medium text-gray-500 whitespace-nowrap">Sisa Pokok</th>
                   <th className="text-right px-3 py-2 font-medium text-gray-500 whitespace-nowrap">Rasio</th>
                   <th className="text-right px-3 py-2 font-medium text-gray-500 whitespace-nowrap">Likuidasi</th>
+                  <th className="text-right px-3 py-2 font-medium text-gray-500 whitespace-nowrap">LT (m²)</th>
+                  <th className="text-right px-3 py-2 font-medium text-gray-500 whitespace-nowrap">LB (m²)</th>
+                  <th className="text-left px-3 py-2 font-medium text-gray-500 whitespace-nowrap">Sertifikat</th>
                   <th className="text-right px-3 py-2 font-medium text-gray-500 whitespace-nowrap">Harga Pasar Est</th>
                   <th className="text-center px-3 py-2 font-medium text-gray-500 whitespace-nowrap">Demand</th>
                   <th className="text-center px-3 py-2 font-medium text-gray-500 whitespace-nowrap">Sellable</th>
@@ -222,6 +225,15 @@ export default function AssetsPage() {
                     </td>
                     <td className="px-3 py-2 text-right text-gray-700 whitespace-nowrap">
                       {fmtRp(asset.liquidationValue)}
+                    </td>
+                    <td className="px-3 py-2 text-right text-gray-700 whitespace-nowrap">
+                      {asset.landArea > 0 ? asset.landArea.toLocaleString('id-ID') : '—'}
+                    </td>
+                    <td className="px-3 py-2 text-right text-gray-700 whitespace-nowrap">
+                      {asset.buildingArea > 0 ? asset.buildingArea.toLocaleString('id-ID') : '—'}
+                    </td>
+                    <td className="px-3 py-2 text-gray-600 whitespace-nowrap">
+                      {asset.certificateType || '—'}
                     </td>
                     <td className="px-3 py-2 text-right text-gray-700 whitespace-nowrap">
                       {asset.marketPriceEst && asset.marketPriceEst > 0

@@ -13,7 +13,8 @@ export type CanonicalField =
   | 'debtor_name'
   | 'principal_outstanding'
   | 'liquidation_ratio'
-  | 'liquidation_value';
+  | 'liquidation_value'
+  | 'certificate_type';
 
 export const CANONICAL_FIELD_LABELS: Record<CanonicalField, string> = {
   bank_name: 'Nama Bank',
@@ -31,6 +32,7 @@ export const CANONICAL_FIELD_LABELS: Record<CanonicalField, string> = {
   principal_outstanding: 'Sisa Pokok Hutang',
   liquidation_ratio: 'Rasio Sisa Pokok / Outstanding (%)',
   liquidation_value: 'Nilai Likuidasi',
+  certificate_type: 'Tipe Sertifikat',
 };
 
 export const ALL_CANONICAL_FIELDS: CanonicalField[] = [
@@ -38,6 +40,7 @@ export const ALL_CANONICAL_FIELDS: CanonicalField[] = [
   'address', 'market_value', 'outstanding', 'land_area',
   'building_area', 'status',
   'debtor_name', 'principal_outstanding', 'liquidation_ratio', 'liquidation_value',
+  'certificate_type',
 ];
 
 export interface BankMapping {
