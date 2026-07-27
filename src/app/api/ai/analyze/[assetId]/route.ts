@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server';
-import { ok, err, requireAuth } from '@/lib/api';
+import { ok, err } from '@/lib/api';
 import { getAssetRepository, getAIAnalysisRepository, getAIAnalystService } from '@/lib/container';
 import { rateLimit } from '@/lib/ratelimit';
 
@@ -18,13 +18,10 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ ass
   }
 }
 
-// POST — generate new analysis (login required + rate limited: 10 req/minute per user)
+// POST — generate new analysis (public, rate limited by IP: 10 req/minute)
 export async function POST(req: NextRequest, { params }: { params: Promise<{ assetId: string }> }) {
-  const { error: authError, session } = await requireAuth();
-  if (authError) return authError;
-
-  const userId = session!.user?.email ?? req.headers.get('x-forwarded-for') ?? 'anon';
-  const rl = rateLimit(`ai:${userId}`, 10, 60_000);
+  const ip = req.headers.get('x-forwarded-for') ?? req.headers.get('x-real-ip') ?? 'anon';
+  const rl = rateLimit(`ai:${ip}`, 10, 60_000);
   if (!rl.ok) {
     return err('RATE_LIMITED', `Terlalu banyak permintaan. Coba lagi dalam ${Math.ceil(rl.retryAfterMs / 1000)} detik.`, 429);
   }
