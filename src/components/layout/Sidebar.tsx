@@ -4,19 +4,15 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
 import {
-  LayoutDashboard, Building2, Upload, Settings,
-  Map, GitBranch, BookOpen, LogIn, FileText,
+  LayoutDashboard, Building2, Settings,
+  Map, LogIn,
 } from 'lucide-react';
 
 const NAV_ITEMS = [
-  { label: 'Dashboard', href: '/', icon: LayoutDashboard, public: true },
-  { label: 'Asset Bank', href: '/assets', icon: Building2, public: true },
-  { label: 'Market Intelligence', href: '/market-intelligence', icon: Map, public: true },
-  { label: 'Import Asset', href: '/import', icon: Upload, public: false },
-  { label: 'Import PDF', href: '/pdf-import', icon: FileText, public: false },
-  { label: 'Mapping Kolom', href: '/mappings', icon: GitBranch, public: false },
-  { label: 'Normalisasi', href: '/normalization', icon: BookOpen, public: false },
-  { label: 'Pengaturan', href: '/settings', icon: Settings, public: false },
+  { label: 'Dashboard',           href: '/',                   icon: LayoutDashboard, public: true,  requiresAuth: false },
+  { label: 'Asset Bank',          href: '/assets',             icon: Building2,       public: true,  requiresAuth: false },
+  { label: 'Market Intelligence', href: '/market-intelligence', icon: Map,             public: true,  requiresAuth: false },
+  { label: 'Pengaturan',          href: '/settings',           icon: Settings,        public: true,  requiresAuth: true  },
 ];
 
 interface SidebarProps {
@@ -26,7 +22,6 @@ interface SidebarProps {
 
 export function Sidebar({ isAuthenticated, onNavigate }: SidebarProps) {
   const pathname = usePathname();
-  const visibleItems = NAV_ITEMS.filter((i) => i.public || isAuthenticated);
 
   return (
     <aside className="w-60 h-full min-h-screen bg-gray-900 flex flex-col">
@@ -38,12 +33,19 @@ export function Sidebar({ isAuthenticated, onNavigate }: SidebarProps) {
 
       {/* Nav */}
       <nav className="flex-1 px-3 py-4 space-y-1">
-        {visibleItems.map((item) => {
-          const active = pathname === item.href || (item.href !== '/' && pathname.startsWith(item.href));
+        {NAV_ITEMS.map((item) => {
+          // Jika butuh auth tapi belum login → arahkan ke login dengan callbackUrl
+          const href = item.requiresAuth && !isAuthenticated
+            ? `/login?callbackUrl=${encodeURIComponent(item.href)}`
+            : item.href;
+
+          const active = pathname === item.href ||
+            (item.href !== '/' && pathname.startsWith(item.href));
+
           return (
             <Link
               key={item.href}
-              href={item.href}
+              href={href}
               onClick={onNavigate}
               className={cn(
                 'flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors',

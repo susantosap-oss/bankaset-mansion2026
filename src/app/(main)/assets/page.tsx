@@ -11,6 +11,11 @@ import { ASSET_STATUS_LABELS } from '@/domain/value-objects/AssetStatus';
 import { AIAnalysisPanel } from '@/components/ai/AIAnalysisPanel';
 import type { Asset } from '@/domain/entities/Asset';
 
+interface AssetEnriched extends Asset {
+  marketPriceEst?: number | null;
+  sellable?: boolean;
+}
+
 const STATUS_BADGE: Record<string, 'success' | 'warning' | 'danger' | 'default'> = {
   ACTIVE: 'success',
   IN_PROCESS: 'warning',
@@ -29,7 +34,7 @@ function fmtRatio(v: number | undefined): string {
 }
 
 interface PaginatedAssets {
-  data: Asset[];
+  data: AssetEnriched[];
   total: number;
   page: number;
   totalPages: number;
@@ -45,7 +50,7 @@ export default function AssetsPage() {
   const [page, setPage] = useState(1);
   const [banks, setBanks] = useState<string[]>([]);
   const [cities, setCities] = useState<string[]>([]);
-  const [aiAsset, setAiAsset] = useState<Asset | null>(null);
+  const [aiAsset, setAiAsset] = useState<AssetEnriched | null>(null);
   const [exporting, setExporting] = useState(false);
   const [exportMsg, setExportMsg] = useState<string | null>(null);
 
@@ -103,12 +108,14 @@ export default function AssetsPage() {
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-xl font-semibold text-gray-900">Asset Bank</h2>
-          <p className="text-sm text-gray-500 mt-0.5">
-            {assets ? `${assets.total} asset` : 'Memuat...'}{' '}
-            <span className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-full px-2 py-0.5 ml-1">
-              Rasio Sisa Pokok ≥ 2 · LTV ≥ 1%
+          <div className="flex flex-wrap items-center gap-1.5 mt-0.5">
+            <p className="text-sm text-gray-500">
+              {assets ? `${assets.total} asset` : 'Memuat...'}
+            </p>
+            <span className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-full px-2 py-0.5">
+              Rasio Sisa Pokok ≥ 2
             </span>
-          </p>
+          </div>
         </div>
         <div className="flex flex-col items-end gap-1">
           <div className="flex gap-2">
@@ -178,6 +185,8 @@ export default function AssetsPage() {
                   <th className="text-right px-3 py-2 font-medium text-gray-500 whitespace-nowrap">Sisa Pokok</th>
                   <th className="text-right px-3 py-2 font-medium text-gray-500 whitespace-nowrap">Rasio</th>
                   <th className="text-right px-3 py-2 font-medium text-gray-500 whitespace-nowrap">Likuidasi</th>
+                  <th className="text-right px-3 py-2 font-medium text-gray-500 whitespace-nowrap">Harga Pasar Est</th>
+                  <th className="text-center px-3 py-2 font-medium text-gray-500 whitespace-nowrap">Sellable</th>
                   <th className="text-center px-3 py-2 font-medium text-gray-500 whitespace-nowrap">Status</th>
                   <th className="px-2 py-2"></th>
                 </tr>
@@ -211,6 +220,16 @@ export default function AssetsPage() {
                     </td>
                     <td className="px-3 py-2 text-right text-gray-700 whitespace-nowrap">
                       {fmtRp(asset.liquidationValue)}
+                    </td>
+                    <td className="px-3 py-2 text-right text-gray-700 whitespace-nowrap">
+                      {asset.marketPriceEst && asset.marketPriceEst > 0
+                        ? `Rp ${(asset.marketPriceEst / 1_000_000).toFixed(0)}jt/m²`
+                        : '—'}
+                    </td>
+                    <td className="px-3 py-2 text-center whitespace-nowrap">
+                      {asset.sellable
+                        ? <Badge variant="success">Sellable</Badge>
+                        : <span className="text-xs text-gray-400">—</span>}
                     </td>
                     <td className="px-3 py-2 text-center whitespace-nowrap">
                       <Badge variant={STATUS_BADGE[asset.status] ?? 'default'}>

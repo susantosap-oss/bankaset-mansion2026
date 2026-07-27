@@ -1,5 +1,15 @@
 import Groq from 'groq-sdk';
 
+export interface DemandRankEntry {
+  area: string;
+  demandScore: number;
+  liquidityScore: number;
+  /** Volume pencarian Google (totalResults dari query buyer-intent) */
+  searchVolume: number;
+  listingCount: number; // listing aktif di portal (sinyal likuiditas)
+  medianPrice: number;  // per m², Rp
+}
+
 export interface AreaResearchResult {
   area: string;
   city: string;
@@ -11,16 +21,28 @@ export interface AreaResearchResult {
   method: 'GROQ_KNOWLEDGE' | 'PORTAL_DATA';
   confidence: 'HIGH' | 'MEDIUM' | 'LOW';
   areaWasSuggested: boolean;
-  portalStats?: {
-    portal: string;
-    listingCount: number;
-    medianPrice: number;
-  }[];
+  /** Pernyataan eksplisit area dengan demand pencarian Google tertinggi */
+  topDemandStatement?: string;
+  /** Ranking area berdasarkan volume pencarian Google pembeli */
+  demandRanking?: DemandRankEntry[];
+  /** Harga pasar estimasi (Rp/m²) dari area demand tertinggi */
+  marketPriceEst?: number;
+  /** Sumber kandidat area: dari database asset atau dari AI discovery */
+  candidateSource?: 'DATABASE' | 'AI_DISCOVERY';
+  /** Jumlah asset Sellable yang ditemukan per kecamatan (hanya jika candidateSource=DATABASE) */
+  dbAssetCounts?: Record<string, number>;
+  portalStats?: { portal: string; listingCount: number; medianPrice: number }[];
   alternatives?: AreaResearchResult[];
 }
 
+// Internal — bawa raw search volume agar bisa dipakai di ranking
+interface AreaResearchInternal extends AreaResearchResult {
+  _buyerSearchVolume: number;
+  _portalListingCount: number;
+}
+
 interface SerperResult {
-  totalResults: string; // "1,230" — from searchInformation
+  totalResults: string;
   organic: Array<{ title: string; snippet: string; link: string }>;
 }
 
@@ -32,7 +54,7 @@ const PORTALS = [
   { name: 'olx.co.id',     site: 'olx.co.id' },
 ];
 
-// ── Serper helpers ─────────────────────────────────────────────────
+// ── Serper ─────────────────────────────────────────────────────────
 
 async function serperSearch(query: string): Promise<SerperResult> {
   const apiKey = process.env.SERPER_API_KEY;
@@ -58,6 +80,41 @@ async function serperSearch(query: string): Promise<SerperResult> {
   }
 }
 
+// ── Parse helper ───────────────────────────────────────────────────
+// Handles: "1.230.000", "1,230,000", "Sekitar 1.230.000 hasil", "About 1,230,000"
+// Strategy: buang semua non-digit, join digit groups
+function parseSearchResultCount(s: string): number {
+  if (!s) return 0;
+  // Ambil semua kelompok digit, gabungkan
+  const groups = s.match(/\d+/g);
+  if (!groups || groups.length === 0) return 0;
+  // Jika ada beberapa grup (separator), gabungkan semua jadi satu angka
+  return parseInt(groups.join(''), 10) || 0;
+}
+
+// ── Demand scoring — dari Google search volume buyer-intent ────────
+// Input: totalResults query "beli rumah {area} {city}"
+// Angka totalResults Google bisa ratusan ribu → jutaan untuk area populer
+function demandFromSearchVolume(totalResults: number): number {
+  if (totalResults >= 5_000_000) return 95;
+  if (totalResults >= 2_000_000) return 88;
+  if (totalResults >= 500_000)   return 80;
+  if (totalResults >= 100_000)   return 70;
+  if (totalResults >= 50_000)    return 60;
+  if (totalResults >= 10_000)    return 48;
+  if (totalResults >= 5_000)     return 38;
+  if (totalResults >= 1_000)     return 27;
+  if (totalResults >= 100)       return 18;
+  return 10;
+}
+
+// ── Liquidity scoring — dari listing aktif di portal ──────────────
+function liquidityFromPortalCount(portalsWithData: number, portalsWithListings: number): number {
+  const base = portalsWithData * 25;
+  const bonus = Math.min(20, portalsWithListings * 7);
+  return Math.min(95, base + bonus);
+}
+
 // ── Price extraction ───────────────────────────────────────────────
 
 function median(arr: number[]): number {
@@ -67,32 +124,33 @@ function median(arr: number[]): number {
   return sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
 }
 
-// ── Demand score from listing count ───────────────────────────────
-// Based on total estimated results across portals
-
-function demandFromCount(total: number): number {
-  if (total >= 500) return 95;
-  if (total >= 200) return 85;
-  if (total >= 100) return 75;
-  if (total >= 50)  return 62;
-  if (total >= 20)  return 50;
-  if (total >= 5)   return 35;
-  return 20;
+function extractPerSqmPrice(text: string): number {
+  const re = /(?:rp\.?\s*)?([\d]+(?:[.,][\d]+)?)\s*(?:juta|jt)\s*[/\\]\s*m[²2²]/gi;
+  let best = 0;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    const num = parseFloat(m[1].replace(',', '.'));
+    if (!isNaN(num)) best = Math.max(best, Math.round(num * 1_000_000));
+  }
+  return best;
 }
 
-// Liquidity: from how many portals have actual organic results
-function liquidityFromPortalCount(portalsWithData: number, totalOrganic: number): number {
-  const base = portalsWithData * 25; // 3 portals → 75
-  const bonus = Math.min(20, Math.floor(totalOrganic / 3)); // up to +20 from organic count
-  return Math.min(95, base + bonus);
+function extractListingCount(text: string): number {
+  const m = text.match(/(\d[\d.]*)\+?\s*(?:properti|rumah|ruko|tanah|kavling|unit|listing|iklan|apartemen|gudang|pabrik|lahan)/i);
+  if (!m) return 0;
+  return parseInt(m[1].replace(/\./g, ''), 10) || 0;
 }
 
-// ── Extract area name from portal URL ─────────────────────────────
-// rumah123: /jual/{city}/{area}/rumah/  →  area slug
-// lamudi:   /{province}/{city}/{area}/  →  area slug
+// ── Area name extraction dari URL portal ──────────────────────────
 
-const PROPERTY_TYPE_SLUGS = new Set(['rumah', 'apartemen', 'ruko', 'tanah', 'kavling', 'gudang', 'kos', 'vila', 'kantor', 'hotel', 'residensial', 'komersial']);
-const GENERIC_SLUGS = new Set(['beli', 'sewa', 'jual', 'baru', 'bekas', 'murah', 'dijual', 'disewa', 'properti', 'listing', 'all', 'lainnya']);
+const PROPERTY_TYPE_SLUGS = new Set([
+  'rumah', 'apartemen', 'ruko', 'tanah', 'kavling', 'gudang',
+  'kos', 'vila', 'kantor', 'hotel', 'residensial', 'komersial',
+]);
+const GENERIC_SLUGS = new Set([
+  'beli', 'sewa', 'jual', 'baru', 'bekas', 'murah', 'dijual',
+  'disewa', 'properti', 'listing', 'all', 'lainnya',
+]);
 
 function slugToName(slug: string): string {
   return slug.replace(/-/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
@@ -106,7 +164,7 @@ function extractAreaFromUrl(url: string, citySlug: string): string | null {
     const candidate = parts[cityIdx + 1];
     if (!candidate) return null;
     if (PROPERTY_TYPE_SLUGS.has(candidate) || GENERIC_SLUGS.has(candidate)) return null;
-    if (/^\d/.test(candidate) || candidate.startsWith('r') && /\d{4,}/.test(candidate)) return null; // listing IDs
+    if (/^\d/.test(candidate) || (candidate.startsWith('r') && /\d{4,}/.test(candidate))) return null;
     if (candidate.length < 3 || candidate.length > 40) return null;
     return slugToName(candidate);
   } catch {
@@ -114,27 +172,50 @@ function extractAreaFromUrl(url: string, citySlug: string): string | null {
   }
 }
 
-// Extract listing count from title/snippet in any format
-// "6.037 Properti Dijual" → 6037 | "7+ Ruko Dijual" → 7 | "Daftar 25 rumah" → 25
-function extractListingCount(text: string): number {
-  const m = text.match(/(\d[\d.]*)\+?\s*(?:properti|rumah|ruko|tanah|kavling|unit|listing|iklan|apartemen|gudang|pabrik|lahan)/i);
-  if (!m) return 0;
-  return parseInt(m[1].replace(/\./g, ''), 10) || 0;
-}
+// Ekstrak area dari snippets hasil pencarian buyer-intent
+// Contoh: "Rumah dijual di Rungkut, Surabaya" → "Rungkut"
+function extractAreasFromSnippets(
+  organics: Array<{ title: string; snippet: string }>,
+  cityName: string,
+): string[] {
+  const cityKey = cityName.toLowerCase().replace(/^kota\s+|^kabupaten\s+/, '');
+  const stopWords = new Set([
+    'Properti', 'Rumah', 'Ruko', 'Apartemen', 'Tanah', 'Jual', 'Dijual',
+    'Beli', 'Cari', 'Indonesia', 'Jawa', 'Timur', 'Google', 'Portal',
+    'Listing', 'Harga', 'Murah', 'Baru', 'Bekas', 'Total', 'Unit',
+  ]);
 
-// Extract per-m² price from snippet: "Rp 3,04 Juta/m²" → 3_040_000
-function extractPerSqmPrice(text: string): number {
-  const re = /(?:rp\.?\s*)?([\d]+(?:[.,][\d]+)?)\s*(?:juta|jt)\s*[/\\]\s*m[²2²]/gi;
-  let best = 0;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(text)) !== null) {
-    const num = parseFloat(m[1].replace(',', '.'));
-    if (!isNaN(num)) best = Math.max(best, Math.round(num * 1_000_000));
+  const mentions = new Map<string, number>();
+
+  for (const o of organics) {
+    const text = `${o.title} ${o.snippet}`;
+
+    // Pattern 1: "di/kawasan/kecamatan/area {NamaArea}"
+    const re1 = /(?:di|kawasan|kecamatan|area|daerah|kelurahan)\s+([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)?)/g;
+    for (const m of text.matchAll(re1)) {
+      const name = m[1].trim();
+      if (name.length < 3 || name.length > 30) continue;
+      if (name.toLowerCase() === cityKey) continue;
+      if (stopWords.has(name)) continue;
+      mentions.set(name, (mentions.get(name) ?? 0) + 2);
+    }
+
+    // Pattern 2: "{NamaArea}, {city}" atau "{NamaArea} {city}"
+    const re2 = new RegExp(`([A-Z][a-zA-Z]+(?:\\s+[A-Z][a-zA-Z]+)?)[,\\s]+${cityKey}`, 'gi');
+    for (const m of text.matchAll(re2)) {
+      const name = m[1].trim();
+      if (name.length < 3 || name.length > 30) continue;
+      if (stopWords.has(name)) continue;
+      mentions.set(name, (mentions.get(name) ?? 0) + 1);
+    }
   }
-  return best;
+
+  return [...mentions.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5)
+    .map(([area]) => area);
 }
 
-// city "kota surabaya" → slug "surabaya"
 function cityToSlug(city: string): string {
   return city.toLowerCase()
     .replace(/^kota\s+/, '')
@@ -151,69 +232,294 @@ export class AreaResearchService {
     this.groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
   }
 
-  async research(area: string | null | undefined, city: string): Promise<AreaResearchResult> {
+  async research(
+    area: string | null | undefined,
+    city: string,
+    dbCandidates: string[] = [],
+  ): Promise<AreaResearchResult> {
     const hasSerper = !!process.env.SERPER_API_KEY;
     const areaProvided = area?.trim() || '';
     const suggestArea = !areaProvided;
 
     if (hasSerper) {
       return suggestArea
-        ? this.discoverAndResearch(city)
-        : this.researchWithPortalData(areaProvided, city);
+        ? this.discoverAndResearch(city, dbCandidates)
+        : this.researchSingleArea(areaProvided, city);
     }
 
-    // Fallback: Groq knowledge (no Serper)
     return this.researchWithGroq(areaProvided || null, city);
   }
 
-  // ── Mode 1: PORTAL_DATA — area specified ────────────────────────
+  // ── Mode 1: area sudah diisi ───────────────────────────────────
 
-  private async researchWithPortalData(area: string, city: string): Promise<AreaResearchResult> {
-    type PortalResult = {
-      portal: string;
-      listingCount: number;
-      perSqmPrice: number;
-      hasResults: boolean;
-      links: string[];
+  private async researchSingleArea(area: string, city: string): Promise<AreaResearchResult> {
+    const r = await this.researchAreaFull(area, city);
+    const { _buyerSearchVolume, _portalListingCount, ...clean } = r;
+    return {
+      ...clean,
+      topDemandStatement:
+        `${area}, ${city} — ${_buyerSearchVolume.toLocaleString('id-ID')} hasil pencarian Google` +
+        (r.suggestedDemandScore >= 70 ? ' (demand TINGGI)' :
+         r.suggestedDemandScore >= 48 ? ' (demand SEDANG)' : ' (demand RENDAH)') +
+        (r.suggestedMedianPrice > 0
+          ? ` · harga pasar est. Rp ${(r.suggestedMedianPrice / 1_000_000).toFixed(1)}jt/m²`
+          : ''),
     };
+  }
 
-    const portalResults = await Promise.all(
-      PORTALS.map(async (p): Promise<PortalResult> => {
-        const q = `properti dijual ${area} ${city} site:${p.site}`;
-        const data = await serperSearch(q);
+  // ── Mode 2: auto-discover — cari kecamatan dengan demand Google tertinggi ──
+  //
+  // Prioritas kandidat:
+  //   1. dbCandidates  — kecamatan dari asset Sellable di database (paling relevan)
+  //   2. Groq suggestion — kecamatan populer dari training data
+  //   3. Snippet buyer search — ekstrak dari organic results
 
-        // Jumlahkan semua count yang ditemukan di title/snippet (bisa dari beberapa tipe properti)
-        let listingCount = 0;
-        let perSqmPrice = 0;
-        for (const r of data.organic) {
-          const text = `${r.title} ${r.snippet}`;
-          listingCount += extractListingCount(text);
-          const p2 = extractPerSqmPrice(text);
-          if (p2 > perSqmPrice) perSqmPrice = p2;
-        }
+  private async discoverAndResearch(city: string, dbCandidates: string[] = []): Promise<AreaResearchResult> {
+    // Path cepat: jika ada data dari database, langsung score — skip Groq & snippet
+    if (dbCandidates.length > 0) {
+      return this.researchFromDbCandidates(city, dbCandidates);
+    }
+    const slug = cityToSlug(city);
 
-        return {
-          portal: p.name,
-          listingCount,
-          perSqmPrice,
-          hasResults: data.organic.length > 0,
-          links: data.organic.slice(0, 2).map((o) => o.link),
-        };
-      })
+    // ── Step 1a: Groq suggest kandidat kecamatan ──────────────────
+    const [groqCandidates, buyerDiscovery] = await Promise.all([
+      this.getCandidateAreasFromGroq(city),
+      serperSearch(`beli rumah kecamatan ${city} Jawa Timur`),
+    ]);
+
+    // ── Step 1b: Ekstrak nama area dari snippets buyer search ──────
+    const snippetCandidates = extractAreasFromSnippets(buyerDiscovery.organic, city);
+
+    // ── Step 1c: Fallback portal URL untuk area backup ─────────────
+    const portalDiscover = await serperSearch(`site:rumah123.com/jual/${slug} properti dijual`);
+    const pathPrefix = `/jual/${slug}/`;
+    const portalCandidates: string[] = [];
+    for (const r of portalDiscover.organic) {
+      try {
+        if (!new URL(r.link).pathname.toLowerCase().includes(pathPrefix)) continue;
+      } catch { continue; }
+      const area = extractAreaFromUrl(r.link, slug);
+      if (area) portalCandidates.push(area);
+    }
+
+    // Prioritas: Groq > snippet buyer > portal (supply-based, paling rendah)
+    const merged = [...groqCandidates, ...snippetCandidates, ...portalCandidates];
+    const uniqueCandidates = [...new Map(merged.map((a) => [a.toLowerCase(), a])).values()].slice(0, 5);
+
+    if (uniqueCandidates.length === 0) {
+      return {
+        area: '',
+        city,
+        suggestedDemandScore: 0,
+        suggestedLiquidityScore: 0,
+        suggestedMedianPrice: 0,
+        topDemandStatement: `Tidak ditemukan kandidat kecamatan untuk ${city}. Isi nama area secara manual.`,
+        reasoning: 'Tidak dapat menemukan area kandidat. Coba isi nama area secara manual.',
+        sources: [],
+        method: 'PORTAL_DATA',
+        confidence: 'LOW',
+        areaWasSuggested: true,
+      };
+    }
+
+    // ── Step 2: Ukur demand tiap kandidat dari Google search volume ──
+    const settled = await Promise.allSettled(
+      uniqueCandidates.map((area) => this.researchAreaFull(area, city))
     );
 
-    const portalsWithData = portalResults.filter((p) => p.hasResults).length;
-    const totalListings = portalResults.reduce((s, p) => s + p.listingCount, 0);
-    // Median per-m² dari portal yang punya data harga per m²
-    const sqmPrices = portalResults.map((p) => p.perSqmPrice).filter((v) => v > 0);
+    const results = settled
+      .filter((r): r is PromiseFulfilledResult<AreaResearchInternal> => r.status === 'fulfilled')
+      .map((r) => r.value);
+
+    if (results.length === 0) {
+      return {
+        area: '',
+        city,
+        suggestedDemandScore: 0,
+        suggestedLiquidityScore: 0,
+        suggestedMedianPrice: 0,
+        topDemandStatement: `Riset demand gagal untuk ${city}. Coba isi area secara manual.`,
+        reasoning: 'Riset gagal. Coba isi nama area secara manual.',
+        sources: [],
+        method: 'PORTAL_DATA',
+        confidence: 'LOW',
+        areaWasSuggested: true,
+      };
+    }
+
+    // Sort by demand score (dari Google search volume pembeli) — tertinggi jadi utama
+    results.sort((a, b) => b.suggestedDemandScore - a.suggestedDemandScore);
+
+    const demandRanking: DemandRankEntry[] = results.map((r) => ({
+      area: r.area,
+      demandScore: r.suggestedDemandScore,
+      liquidityScore: r.suggestedLiquidityScore,
+      searchVolume: r._buyerSearchVolume,
+      listingCount: r._portalListingCount,
+      medianPrice: r.suggestedMedianPrice,
+    }));
+
+    const [main, ...rest] = results;
+    const topDemandStatement =
+      `Demand pencarian Google terbanyak di ${city} ada di ${main.area}` +
+      (main._buyerSearchVolume > 0
+        ? ` (${main._buyerSearchVolume.toLocaleString('id-ID')} hasil pencarian pembeli)`
+        : '') +
+      (main.suggestedMedianPrice > 0
+        ? ` — harga pasar est. Rp ${(main.suggestedMedianPrice / 1_000_000).toFixed(1)}jt/m²`
+        : '');
+
+    const { _buyerSearchVolume: _mv, _portalListingCount: _ml, ...mainClean } = main;
+    const alternativesClean = rest.map(({ _buyerSearchVolume: _v, _portalListingCount: _l, ...r }) => ({
+      ...r,
+      areaWasSuggested: true,
+    }));
+
+    return {
+      ...mainClean,
+      areaWasSuggested: true,
+      topDemandStatement,
+      demandRanking,
+      marketPriceEst: main.suggestedMedianPrice > 0 ? main.suggestedMedianPrice : undefined,
+      alternatives: alternativesClean,
+    };
+  }
+
+  // ── Mode 2b: kandidat dari database asset Sellable ────────────────
+  // Score tiap kecamatan dari demand Google — ranking = kecamatan mana
+  // yang paling banyak dicari pembeli di kota yang sama
+
+  private async researchFromDbCandidates(city: string, candidates: string[]): Promise<AreaResearchResult> {
+    const settled = await Promise.allSettled(
+      candidates.map((area) => this.researchAreaFull(area, city))
+    );
+
+    const results = settled
+      .filter((r): r is PromiseFulfilledResult<AreaResearchInternal> => r.status === 'fulfilled')
+      .map((r) => r.value);
+
+    if (results.length === 0) {
+      return {
+        area: '',
+        city,
+        suggestedDemandScore: 0,
+        suggestedLiquidityScore: 0,
+        suggestedMedianPrice: 0,
+        topDemandStatement: `Riset demand gagal untuk asset di ${city}. Coba isi area secara manual.`,
+        reasoning: 'Riset gagal. Coba isi nama area secara manual.',
+        sources: [],
+        method: 'PORTAL_DATA',
+        confidence: 'LOW',
+        areaWasSuggested: true,
+        candidateSource: 'DATABASE',
+      };
+    }
+
+    results.sort((a, b) => b.suggestedDemandScore - a.suggestedDemandScore);
+
+    const demandRanking: DemandRankEntry[] = results.map((r) => ({
+      area: r.area,
+      demandScore: r.suggestedDemandScore,
+      liquidityScore: r.suggestedLiquidityScore,
+      searchVolume: r._buyerSearchVolume,
+      listingCount: r._portalListingCount,
+      medianPrice: r.suggestedMedianPrice,
+    }));
+
+    const [main, ...rest] = results;
+    const topDemandStatement =
+      `Dari asset Sellable di ${city}, demand Google tertinggi ada di ${main.area}` +
+      (main._buyerSearchVolume > 0
+        ? ` (${main._buyerSearchVolume.toLocaleString('id-ID')} hasil pencarian)`
+        : '') +
+      (main.suggestedMedianPrice > 0
+        ? ` · harga pasar est. Rp ${(main.suggestedMedianPrice / 1_000_000).toFixed(1)}jt/m²`
+        : '');
+
+    const { _buyerSearchVolume: _mv, _portalListingCount: _ml, ...mainClean } = main;
+    const alternativesClean = rest.map(({ _buyerSearchVolume: _v, _portalListingCount: _l, ...r }) => ({
+      ...r,
+      areaWasSuggested: true,
+    }));
+
+    return {
+      ...mainClean,
+      areaWasSuggested: true,
+      topDemandStatement,
+      demandRanking,
+      marketPriceEst: main.suggestedMedianPrice > 0 ? main.suggestedMedianPrice : undefined,
+      candidateSource: 'DATABASE',
+      alternatives: alternativesClean,
+    };
+  }
+
+  // ── Core: riset satu area ─────────────────────────────────────────
+  // Demand  = totalResults Google query "properti {area} {city}"
+  //           semakin banyak hasil = area semakin banyak dicari = demand tinggi
+  // Likuid. = listing aktif di portal properti (rumah123, lamudi, olx)
+
+  private async researchAreaFull(area: string, city: string): Promise<AreaResearchInternal> {
+    // Satu demand query — cukup untuk sinyal pencarian, hemat Serper quota
+    const demandQuery = `properti ${area} ${city}`;
+
+    // Parallel: demand query + 3 portal queries = 4 calls per area
+    const [demandResult, ...portalResults] = await Promise.all([
+      serperSearch(demandQuery),
+      ...PORTALS.map((p) => serperSearch(`properti dijual ${area} ${city} site:${p.site}`)),
+    ]);
+
+    const rawTotal = demandResult.totalResults;
+    let buyerSearchVolume = parseSearchResultCount(rawTotal);
+
+    // Debug: lihat format raw dari Serper agar bisa diperbaiki jika perlu
+    if (process.env.NODE_ENV !== 'production') {
+      console.log(`[demand] "${demandQuery}" → totalResults="${rawTotal}" → parsed=${buyerSearchVolume}`);
+    }
+
+    // Fallback: jika totalResults tidak dapat diparsing (API format berubah),
+    // estimasi dari organic results — Serper mengembalikan top N hasil yang relevan
+    if (buyerSearchVolume === 0 && demandResult.organic.length > 0) {
+      // 10 organic hasil ≈ Google punya setidaknya ratusan ribu halaman relevan
+      buyerSearchVolume = demandResult.organic.length * 50_000;
+    }
+
+    const demandScore = demandFromSearchVolume(buyerSearchVolume);
+
+    // ── Likuiditas & harga: dari portal listing ─────────────────────
+    type PortalData = {
+      portal: string; listingCount: number; perSqmPrice: number;
+      hasResults: boolean; links: string[];
+    };
+    const portalData: PortalData[] = portalResults.map((data, i) => {
+      let listingCount = 0;
+      let perSqmPrice = 0;
+      for (const r of data.organic) {
+        const text = `${r.title} ${r.snippet}`;
+        listingCount += extractListingCount(text);
+        const p = extractPerSqmPrice(text);
+        if (p > perSqmPrice) perSqmPrice = p;
+      }
+      return {
+        portal: PORTALS[i].name,
+        listingCount,
+        perSqmPrice,
+        hasResults: data.organic.length > 0,
+        links: data.organic.slice(0, 2).map((o) => o.link),
+      };
+    });
+
+    const portalsWithData = portalData.filter((p) => p.hasResults).length;
+    const portalsWithListings = portalData.filter((p) => p.listingCount > 0).length;
+    const totalListings = portalData.reduce((s, p) => s + p.listingCount, 0);
+    const sqmPrices = portalData.map((p) => p.perSqmPrice).filter((v) => v > 0);
     const medianPerSqm = Math.round(median(sqmPrices));
 
-    const demandScore = demandFromCount(totalListings > 0 ? totalListings : portalsWithData * 5);
-    const liquidityScore = liquidityFromPortalCount(portalsWithData, portalResults.filter((p) => p.listingCount > 0).length);
+    const liquidityScore = liquidityFromPortalCount(portalsWithData, portalsWithListings);
     const confidence: AreaResearchResult['confidence'] =
       portalsWithData >= 2 ? 'HIGH' : portalsWithData === 1 ? 'MEDIUM' : 'LOW';
 
     const reasoning = await this.generateReasoning(area, city, {
+      buyerSearchVolume,
       totalListings,
       portalsWithData,
       medianPrice: medianPerSqm,
@@ -224,129 +530,74 @@ export class AreaResearchService {
       city,
       suggestedDemandScore: demandScore,
       suggestedLiquidityScore: liquidityScore,
-      suggestedMedianPrice: medianPerSqm, // hanya diisi jika ditemukan harga /m² di snippet
+      suggestedMedianPrice: medianPerSqm,
       reasoning,
-      sources: portalResults.flatMap((p) => p.links).filter(Boolean),
+      sources: portalData.flatMap((p) => p.links).filter(Boolean),
       method: 'PORTAL_DATA',
       confidence,
       areaWasSuggested: false,
-      portalStats: portalResults.map((p) => ({
+      portalStats: portalData.map((p) => ({
         portal: p.portal,
         listingCount: p.listingCount,
         medianPrice: p.perSqmPrice,
       })),
+      _buyerSearchVolume: buyerSearchVolume,
+      _portalListingCount: totalListings,
     };
   }
 
-  // ── Mode 2: PORTAL_DATA — discover most active area in city ──────
-  // 100% data dari portal — tidak ada Groq untuk nama area
+  // ── Groq: suggest kandidat kecamatan ─────────────────────────────
+  // Groq punya knowledge tentang kecamatan populer di kota-kota Jawa Timur
 
-  private async discoverAndResearch(city: string): Promise<AreaResearchResult> {
-    const slug = cityToSlug(city);
-
-    // Query kecamatan-level pages di rumah123 untuk kota ini
-    const results = await serperSearch(`site:rumah123.com/jual/${slug} properti dijual`);
-
-    // Ekstrak nama area dari URL — HANYA yang strict di bawah /jual/{citySlug}/
-    const areaScore = new Map<string, number>();
-    const organic = results.organic;
-    const pathPrefix = `/jual/${slug}/`;
-    for (let i = 0; i < organic.length; i++) {
-      const r = organic[i];
-      // Strict check: URL harus benar-benar di bawah /jual/{city}/
-      try {
-        const pathname = new URL(r.link).pathname.toLowerCase();
-        if (!pathname.includes(pathPrefix)) continue;
-      } catch { continue; }
-
-      const area = extractAreaFromUrl(r.link, slug);
-      if (!area) continue;
-      const count = extractListingCount(`${r.title} ${r.snippet}`);
-      const positionScore = organic.length - i;
-      const score = count > 0 ? count : positionScore;
-      const current = areaScore.get(area) ?? 0;
-      areaScore.set(area, Math.max(current, score));
+  private async getCandidateAreasFromGroq(city: string): Promise<string[]> {
+    try {
+      const completion = await this.groq.chat.completions.create({
+        model: GROQ_MODEL,
+        messages: [{
+          role: 'user',
+          content: `Sebutkan 5 kecamatan di ${city}, Jawa Timur yang paling banyak dicari pembeli properti (rumah, ruko, tanah). Berdasarkan popularitas & aktivitas pasar properti.
+Format hanya JSON array: ["kecamatan1","kecamatan2","kecamatan3","kecamatan4","kecamatan5"]
+Tanpa penjelasan, tanpa prefix "Kecamatan".`,
+        }],
+        temperature: 0.2,
+        max_tokens: 80,
+      });
+      const raw = completion.choices[0]?.message?.content ?? '[]';
+      const match = raw.match(/\[[\s\S]*?\]/);
+      if (!match) return [];
+      const parsed = JSON.parse(match[0]) as unknown[];
+      return parsed.filter((s): s is string => typeof s === 'string').slice(0, 5);
+    } catch {
+      return [];
     }
-
-    // Urutkan berdasarkan skor tertinggi, ambil top 3
-    const sorted = [...areaScore.entries()].sort((a, b) => b[1] - a[1]);
-    const top3Areas = sorted.slice(0, 3).map(([area]) => area);
-
-    if (top3Areas.length === 0) {
-      return {
-        area: '',
-        city,
-        suggestedDemandScore: 0,
-        suggestedLiquidityScore: 0,
-        suggestedMedianPrice: 0,
-        reasoning: 'Tidak ditemukan data listing di portal untuk kota ini. Coba isi nama area secara manual.',
-        sources: [],
-        method: 'PORTAL_DATA',
-        confidence: 'LOW',
-        areaWasSuggested: true,
-      };
-    }
-
-    // Research semua top area secara paralel
-    const settled = await Promise.allSettled(
-      top3Areas.map((area) => this.researchWithPortalData(area, city))
-    );
-
-    const successResults = settled
-      .filter((r): r is PromiseFulfilledResult<AreaResearchResult> => r.status === 'fulfilled')
-      .map((r) => r.value);
-
-    if (successResults.length === 0) {
-      return {
-        area: '',
-        city,
-        suggestedDemandScore: 0,
-        suggestedLiquidityScore: 0,
-        suggestedMedianPrice: 0,
-        reasoning: 'Riset portal gagal. Coba isi nama area secara manual.',
-        sources: [],
-        method: 'PORTAL_DATA',
-        confidence: 'LOW',
-        areaWasSuggested: true,
-      };
-    }
-
-    // Sort by demand score — yang tertinggi jadi utama
-    successResults.sort((a, b) => b.suggestedDemandScore - a.suggestedDemandScore);
-    const [main, ...rest] = successResults;
-    return {
-      ...main,
-      areaWasSuggested: true,
-      alternatives: rest.map((r) => ({ ...r, areaWasSuggested: true })),
-    };
   }
 
-  // ── Mode 3: Groq knowledge (no Serper) ──────────────────────────
+  // ── Mode 3: Groq knowledge (no Serper) ───────────────────────────
 
   private async researchWithGroq(area: string | null, city: string): Promise<AreaResearchResult> {
     const suggestArea = !area;
     const prompt = suggestArea
-      ? `Kamu adalah analis pasar properti Jawa Timur. Rekomendasikan satu kecamatan/area properti paling aktif di ${city}, Jawa Timur beserta estimasi skor pasar.
+      ? `Kamu adalah analis pasar properti Jawa Timur. Rekomendasikan kecamatan dengan demand pencarian Google tertinggi di ${city}, Jawa Timur.
 
 Format JSON (hanya JSON):
 {
   "suggestedArea": "<nama kecamatan>",
-  "demandScore": <0-100>,
-  "liquidityScore": <0-100>,
+  "demandScore": <0-100, berdasarkan banyaknya pencarian pembeli>,
+  "liquidityScore": <0-100, berdasarkan ketersediaan listing>,
   "medianPrice": <harga median per m² dalam rupiah>,
   "reasoning": "<2-3 kalimat alasan>",
   "confidence": "MEDIUM"
 }`
-      : `Kamu adalah analis pasar properti Jawa Timur. Estimasi skor pasar untuk:
+      : `Kamu adalah analis pasar properti Jawa Timur. Estimasi skor untuk:
 - Area: ${area}
 - Kota: ${city}, Jawa Timur
 
 Format JSON (hanya JSON):
 {
-  "demandScore": <0-100>,
+  "demandScore": <0-100, berdasarkan banyaknya pencarian pembeli di Google>,
   "liquidityScore": <0-100>,
   "medianPrice": <harga median per m² dalam rupiah>,
-  "reasoning": "<2-3 kalimat alasan>",
+  "reasoning": "<2-3 kalimat>",
   "confidence": "<HIGH|MEDIUM|LOW>"
 }`;
 
@@ -364,9 +615,7 @@ Format JSON (hanya JSON):
       parsed = match ? JSON.parse(match[0]) : {};
     } catch { parsed = {}; }
 
-    const resolvedArea = suggestArea
-      ? String(parsed.suggestedArea ?? '').trim()
-      : area!;
+    const resolvedArea = suggestArea ? String(parsed.suggestedArea ?? '').trim() : area!;
 
     return {
       area: resolvedArea,
@@ -383,28 +632,34 @@ Format JSON (hanya JSON):
     };
   }
 
-  // ── Groq reasoning text (used alongside portal data) ─────────────
+  // ── Groq reasoning — menyebut search volume, bukan listing ───────
 
   private async generateReasoning(
     area: string,
     city: string,
-    stats: { totalListings: number; portalsWithData: number; medianPrice: number }
+    stats: { buyerSearchVolume: number; totalListings: number; portalsWithData: number; medianPrice: number },
   ): Promise<string> {
+    const demandLevel =
+      stats.buyerSearchVolume >= 500_000 ? 'sangat tinggi' :
+      stats.buyerSearchVolume >= 100_000 ? 'tinggi' :
+      stats.buyerSearchVolume >= 10_000  ? 'sedang' :
+      stats.buyerSearchVolume >= 1_000   ? 'rendah' : 'sangat rendah';
+
     try {
       const completion = await this.groq.chat.completions.create({
         model: GROQ_MODEL,
         messages: [{
           role: 'user',
           content: `Jelaskan potensi properti di ${area}, ${city} Jawa Timur dalam 2-3 kalimat singkat.
-Data: ${stats.totalListings} listing ditemukan di ${stats.portalsWithData} portal, median harga lahan Rp ${(stats.medianPrice / 1_000_000).toFixed(0)} juta/m².
-Fokus: aksesibilitas, karakteristik kawasan, daya tarik investasi. Jawab langsung tanpa pembuka.`,
+Data: volume pencarian Google ${stats.buyerSearchVolume.toLocaleString('id-ID')} hasil (tingkat demand: ${demandLevel}), ${stats.totalListings} listing aktif di ${stats.portalsWithData} portal properti, median harga Rp ${(stats.medianPrice / 1_000_000).toFixed(0)} juta/m².
+Aturan: semakin tinggi volume pencarian Google = semakin besar demand pembeli. Jelaskan sesuai level demand tersebut. Fokus pada karakteristik kawasan dan daya tarik investasi. Jawab langsung tanpa pembuka.`,
         }],
         temperature: 0.4,
         max_tokens: 200,
       });
       return completion.choices[0]?.message?.content?.trim() ?? '';
     } catch {
-      return `Area ${area} di ${city} memiliki ${stats.totalListings} listing properti aktif di portal properti.`;
+      return `${area}, ${city}: volume pencarian Google ${stats.buyerSearchVolume.toLocaleString('id-ID')} hasil (demand ${demandLevel}), ${stats.totalListings} listing aktif di portal.`;
     }
   }
 }

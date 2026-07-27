@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server';
 import { ok, err, requirePrivileged } from '@/lib/api';
-import { getAssetRepository } from '@/lib/container';
+import { getAssetRepository, getAreaIntelligenceRepository } from '@/lib/container';
+import { canonicalize } from '@/lib/cityUtils';
 
 export const maxDuration = 60;
 
@@ -16,7 +17,22 @@ export async function POST(_req: NextRequest) {
   if (error) return error;
 
   try {
-    const count = await getAssetRepository().exportSellable(QUALITY_FILTER);
+    // Bangun peta area intelligence: canonical city → entry demand tertinggi
+    const allAreas = await getAreaIntelligenceRepository().findAll();
+    const areaMap = new Map<string, { medianPrice: number; demandScore: number; topArea: string }>();
+    for (const ai of allAreas) {
+      const key = canonicalize(ai.city).toLowerCase();
+      const existing = areaMap.get(key);
+      if (!existing || ai.final.demandScore > existing.demandScore) {
+        areaMap.set(key, {
+          medianPrice: ai.final.medianPrice,
+          demandScore: ai.final.demandScore,
+          topArea: ai.area,
+        });
+      }
+    }
+
+    const count = await getAssetRepository().exportSellable(QUALITY_FILTER, 'Asset Sellable', { areaMap });
     return ok({ exported: count, sheet: 'Asset Sellable' });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);

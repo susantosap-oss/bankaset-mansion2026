@@ -45,7 +45,7 @@ function rowToCRMUser(row: string[]): CRMUser | null {
   };
 }
 
-/** Verify email + plain-text password (hashed to MD5 for comparison) */
+/** Verify email + plain-text password */
 export async function verifyCRMLogin(email: string, password: string): Promise<CRMUser | null> {
   try {
     const dataRows = await readAgents();

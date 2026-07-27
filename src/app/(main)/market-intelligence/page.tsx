@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { Plus, Trash2, Save, XCircle, RefreshCw, Sparkles, CheckCircle, Globe, Brain, ExternalLink } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
@@ -31,6 +31,15 @@ interface NewAreaForm {
   sourceNote: string;
 }
 
+interface DemandRankEntry {
+  area: string;
+  demandScore: number;
+  liquidityScore: number;
+  searchVolume: number;
+  listingCount: number;
+  medianPrice: number;
+}
+
 interface ResearchResult {
   area: string;
   city: string;
@@ -42,6 +51,10 @@ interface ResearchResult {
   method: 'GROQ_KNOWLEDGE' | 'PORTAL_DATA';
   confidence: 'HIGH' | 'MEDIUM' | 'LOW';
   areaWasSuggested: boolean;
+  topDemandStatement?: string;
+  demandRanking?: DemandRankEntry[];
+  marketPriceEst?: number;
+  candidateSource?: 'DATABASE' | 'AI_DISCOVERY';
   portalStats?: { portal: string; listingCount: number; medianPrice: number }[];
   alternatives?: ResearchResult[];
 }
@@ -109,7 +122,367 @@ function StatBox({ label, value, color, suffix = '' }: {
   );
 }
 
-// ── Research Approval Card ─────────────────────────────────────────
+// ── List Approval Mode — simpan satu-satu atau semua sekaligus ─────
+interface ListEntry {
+  area: string;
+  demandScore: string;
+  liquidityScore: string;
+  medianPrice: string;
+  sourceNote: string;
+  saved: boolean;
+  saving: boolean;
+  error: string | null;
+}
+
+function ListApprovalMode({
+  result,
+  onDismiss,
+  onAllSaved,
+}: {
+  result: ResearchResult;
+  onDismiss: () => void;
+  onAllSaved: () => void;
+}) {
+  const defaultNote = `Riset AI (${result.method === 'PORTAL_DATA' ? 'Portal Data' : 'Groq'}) — ${new Date().toLocaleDateString('id-ID')}`;
+  const ranking = result.demandRanking ?? [];
+
+  const [entries, setEntries] = useState<ListEntry[]>(() =>
+    ranking.map((r) => ({
+      area: r.area,
+      demandScore: String(r.demandScore),
+      liquidityScore: String(r.liquidityScore ?? 50),
+      medianPrice: r.medianPrice > 0 ? String(r.medianPrice) : '',
+      sourceNote: defaultNote,
+      saved: false,
+      saving: false,
+      error: null,
+    }))
+  );
+  const [savingAll, setSavingAll] = useState(false);
+
+  function update(idx: number, patch: Partial<ListEntry>) {
+    setEntries((prev) => prev.map((e, i) => i === idx ? { ...e, ...patch } : e));
+  }
+
+  async function saveEntry(idx: number, entry: ListEntry): Promise<boolean> {
+    update(idx, { saving: true, error: null });
+    try {
+      const res = await fetch('/api/market-intelligence', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          area: entry.area.trim(),
+          city: result.city,
+          demandScore: parseInt(entry.demandScore) || 0,
+          liquidityScore: parseInt(entry.liquidityScore) || 0,
+          medianPrice: entry.medianPrice ? parseInt(entry.medianPrice) : 0,
+          sourceNote: entry.sourceNote || defaultNote,
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok || json.error) throw new Error(json.error?.message ?? `Error ${res.status}`);
+      update(idx, { saving: false, saved: true });
+      return true;
+    } catch (e) {
+      update(idx, { saving: false, error: e instanceof Error ? e.message : 'Gagal menyimpan' });
+      return false;
+    }
+  }
+
+  async function handleSaveOne(idx: number) {
+    await saveEntry(idx, entries[idx]);
+  }
+
+  async function handleSaveAll() {
+    setSavingAll(true);
+    // Snapshot entries saat ini agar tidak stale di dalam loop
+    const snapshot = [...entries];
+    for (let i = 0; i < snapshot.length; i++) {
+      if (!snapshot[i].saved) await saveEntry(i, snapshot[i]);
+    }
+    setSavingAll(false);
+    // Reload parent setelah semua (atau sebagian) berhasil disimpan
+    onAllSaved();
+  }
+
+  const savedCount = entries.filter((e) => e.saved).length;
+  const allDone = savedCount === entries.length;
+
+  return (
+    <div className="rounded-xl border-2 border-blue-200 bg-blue-50/60 p-5 space-y-4">
+      {/* Header */}
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <Globe className="w-4 h-4 text-blue-600 shrink-0" />
+          <div>
+            <p className="text-sm font-semibold text-blue-800">
+              {result.candidateSource === 'DATABASE'
+                ? `Hasil Riset Demand — Asset Sellable di ${result.city}`
+                : `Hasil Riset Demand — ${result.city}`}
+            </p>
+            <p className="text-xs text-blue-600">
+              {result.candidateSource === 'DATABASE'
+                ? '📦 Kandidat dari kecamatan asset di database'
+                : 'Kandidat dari rekomendasi AI'}{' · '}
+              {savedCount}/{entries.length} tersimpan
+            </p>
+          </div>
+        </div>
+        <button onClick={onDismiss} className="text-blue-400 hover:text-blue-600 p-1">
+          <XCircle className="w-4 h-4" />
+        </button>
+      </div>
+
+      {/* Top demand statement */}
+      {result.topDemandStatement && (
+        <div className="rounded-lg bg-emerald-50 border border-emerald-200 px-4 py-3 flex items-start gap-2">
+          <span className="text-emerald-600 text-lg leading-none mt-0.5">📍</span>
+          <p className="text-sm font-semibold text-emerald-800">{result.topDemandStatement}</p>
+        </div>
+      )}
+
+      {/* List entries — satu per kecamatan */}
+      <div className="space-y-3">
+        {entries.map((entry, idx) => {
+          const rank = ranking[idx];
+          return (
+            <div
+              key={entry.area}
+              className={`rounded-xl border p-4 transition-colors ${
+                entry.saved
+                  ? 'bg-emerald-50 border-emerald-200'
+                  : 'bg-white border-gray-200'
+              }`}
+            >
+              {/* Row header */}
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-2">
+                  <span className={`text-xs font-bold w-5 h-5 rounded-full flex items-center justify-center ${
+                    idx === 0 ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-600'
+                  }`}>{idx + 1}</span>
+                  <div>
+                    <p className="text-sm font-semibold text-gray-800">{entry.area}</p>
+                    <p className="text-xs text-gray-400">
+                      {rank?.searchVolume > 0
+                        ? `~${rank.searchVolume.toLocaleString('id-ID')} hasil pencarian Google`
+                        : 'Data pencarian tidak tersedia'}{' · '}
+                      {rank?.listingCount > 0 ? `~${rank.listingCount.toLocaleString('id-ID')} listing` : ''}
+                    </p>
+                  </div>
+                </div>
+                {entry.saved ? (
+                  <span className="inline-flex items-center gap-1 text-xs font-medium text-emerald-700 bg-emerald-100 px-2 py-1 rounded-full">
+                    <CheckCircle className="w-3 h-3" /> Tersimpan
+                  </span>
+                ) : (
+                  <Button
+                    size="sm"
+                    onClick={() => handleSaveOne(idx)}
+                    loading={entry.saving}
+                    disabled={savingAll}
+                  >
+                    <Save className="w-3 h-3" /> Simpan
+                  </Button>
+                )}
+              </div>
+
+              {/* Error */}
+              {entry.error && (
+                <p className="text-xs text-red-600 mb-2">{entry.error}</p>
+              )}
+
+              {/* Editable scores — tampil hanya jika belum tersimpan */}
+              {!entry.saved && (
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                  <div>
+                    <label className="text-xs text-gray-400 block mb-1">Demand Score</label>
+                    <input type="number" min="0" max="100"
+                      value={entry.demandScore}
+                      onChange={(e) => update(idx, { demandScore: e.target.value })}
+                      className="w-full rounded-lg border border-gray-200 px-2 py-1.5 text-xs font-semibold text-blue-700 focus:outline-none focus:ring-1 focus:ring-blue-400"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs text-gray-400 block mb-1">Liquidity Score</label>
+                    <input type="number" min="0" max="100"
+                      value={entry.liquidityScore}
+                      onChange={(e) => update(idx, { liquidityScore: e.target.value })}
+                      className="w-full rounded-lg border border-gray-200 px-2 py-1.5 text-xs font-semibold text-emerald-700 focus:outline-none focus:ring-1 focus:ring-blue-400"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs text-gray-400 block mb-1">Harga Pasar (Rp/m²)</label>
+                    <input type="number" min="0"
+                      value={entry.medianPrice}
+                      onChange={(e) => update(idx, { medianPrice: e.target.value })}
+                      className="w-full rounded-lg border border-gray-200 px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-blue-400"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs text-gray-400 block mb-1">Catatan</label>
+                    <input type="text"
+                      value={entry.sourceNote}
+                      onChange={(e) => update(idx, { sourceNote: e.target.value })}
+                      className="w-full rounded-lg border border-gray-200 px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-blue-400"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* Saved summary */}
+              {entry.saved && (
+                <div className="flex gap-4 text-xs text-emerald-700">
+                  <span>Demand: {entry.demandScore}</span>
+                  <span>Likuiditas: {entry.liquidityScore}</span>
+                  {entry.medianPrice && <span>Harga: Rp {(parseInt(entry.medianPrice) / 1_000_000).toFixed(1)}jt/m²</span>}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Footer actions */}
+      <div className="flex items-center justify-between pt-1">
+        <Button variant="secondary" onClick={onDismiss} disabled={savingAll}>
+          {allDone ? 'Tutup' : 'Batal'}
+        </Button>
+        {!allDone && (
+          <Button onClick={handleSaveAll} loading={savingAll}>
+            <CheckCircle className="w-4 h-4" />
+            Simpan Semua ({entries.length - savedCount} tersisa)
+          </Button>
+        )}
+        {allDone && (
+          <p className="text-xs text-emerald-600 font-medium">✓ Semua {entries.length} area tersimpan</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Single Area Approval Card (area diisi manual / riset ulang row) ──
+function SingleAreaCard({
+  result,
+  form,
+  onUpdateForm,
+  onApprove,
+  onDismiss,
+  saving,
+}: {
+  result: ResearchResult;
+  form: NewAreaForm;
+  onUpdateForm: (f: Partial<NewAreaForm>) => void;
+  onApprove: () => void;
+  onDismiss: () => void;
+  saving: boolean;
+}) {
+  const active = result;
+  return (
+    <div className="rounded-xl border-2 border-blue-200 bg-blue-50/60 p-5 space-y-4">
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex items-center gap-2">
+          {active.method === 'PORTAL_DATA'
+            ? <Globe className="w-4 h-4 text-blue-600 shrink-0" />
+            : <Brain className="w-4 h-4 text-blue-600 shrink-0" />}
+          <div>
+            <p className="text-sm font-semibold text-blue-800">
+              {`Hasil Riset AI — ${active.area}, ${active.city}`}
+            </p>
+            <p className="text-xs text-blue-600">
+              {active.method === 'PORTAL_DATA' ? 'Data Portal (rumah123 · lamudi · OLX)' : 'Estimasi Groq Knowledge'}{' · '}
+              Keyakinan: <ConfidenceBadge confidence={active.confidence} />
+            </p>
+          </div>
+        </div>
+        <button onClick={onDismiss} className="text-blue-400 hover:text-blue-600 p-1">
+          <XCircle className="w-4 h-4" />
+        </button>
+      </div>
+
+      {result.topDemandStatement && (
+        <div className="rounded-lg bg-emerald-50 border border-emerald-200 px-4 py-3 flex items-start gap-2">
+          <span className="text-emerald-600 text-lg leading-none mt-0.5">📍</span>
+          <p className="text-sm font-semibold text-emerald-800">{result.topDemandStatement}</p>
+        </div>
+      )}
+
+      <div className="rounded-lg bg-white border border-blue-100 px-4 py-3 text-sm text-gray-700 leading-relaxed">
+        {active.reasoning}
+      </div>
+
+      {active.portalStats && active.portalStats.some((p) => p.listingCount > 0) && (
+        <div className="rounded-lg bg-white border border-blue-100 px-4 py-3">
+          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Listing Aktif per Portal</p>
+          <div className="grid grid-cols-3 gap-2">
+            {active.portalStats.map((p) => (
+              <div key={p.portal} className="text-center">
+                <p className="text-xs text-gray-400 truncate">{p.portal}</p>
+                <p className="text-sm font-bold text-blue-700">
+                  {p.listingCount > 0 ? `~${p.listingCount.toLocaleString('id-ID')}` : '—'}
+                </p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {active.sources.length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {active.sources.slice(0, 4).map((src, i) => {
+            const domain = new URL(src).hostname.replace('www.', '');
+            return (
+              <a key={i} href={src} target="_blank" rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 text-xs bg-white border border-blue-200 text-blue-700 px-2 py-1 rounded-full hover:bg-blue-100 transition-colors">
+                {domain} <ExternalLink className="w-2.5 h-2.5" />
+              </a>
+            );
+          })}
+        </div>
+      )}
+
+      <div className="bg-white rounded-xl border border-blue-100 p-4 space-y-3">
+        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Skor — Edit jika perlu</p>
+        <div className="grid grid-cols-3 gap-3">
+          <div>
+            <label className="text-xs text-gray-500 block mb-1">Demand Score</label>
+            <input type="number" min="0" max="100" value={form.demandScore}
+              onChange={(e) => onUpdateForm({ demandScore: e.target.value })}
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-semibold text-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-400" />
+          </div>
+          <div>
+            <label className="text-xs text-gray-500 block mb-1">Liquidity Score</label>
+            <input type="number" min="0" max="100" value={form.liquidityScore}
+              onChange={(e) => onUpdateForm({ liquidityScore: e.target.value })}
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-semibold text-emerald-700 focus:outline-none focus:ring-2 focus:ring-blue-400" />
+          </div>
+          <div>
+            <label className="text-xs text-gray-500 block mb-1">Harga Pasar (Rp/m²)</label>
+            <input type="number" min="0" value={form.medianPrice}
+              onChange={(e) => onUpdateForm({ medianPrice: e.target.value })}
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400" />
+          </div>
+        </div>
+        <div>
+          <label className="text-xs text-gray-500 block mb-1">Catatan Sumber</label>
+          <input type="text" value={form.sourceNote}
+            onChange={(e) => onUpdateForm({ sourceNote: e.target.value })}
+            placeholder={`Riset AI (${active.method === 'PORTAL_DATA' ? 'Portal Data' : 'Groq Knowledge'}) — ${new Date().toLocaleDateString('id-ID')}`}
+            className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400" />
+        </div>
+      </div>
+
+      <div className="flex justify-end gap-2">
+        <Button variant="secondary" onClick={onDismiss}>Batal</Button>
+        <Button onClick={onApprove} loading={saving}>
+          <CheckCircle className="w-4 h-4" /> Approve & Simpan
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+// ── ResearchCard: router ke list atau single mode ──────────────────
 function ResearchCard({
   result,
   form,
@@ -125,173 +498,26 @@ function ResearchCard({
   onDismiss: () => void;
   saving: boolean;
 }) {
-  const allResults = [result, ...(result.alternatives ?? [])];
-  const [selectedIdx, setSelectedIdx] = useState(0);
-  const active = allResults[selectedIdx] ?? result;
-
-  function selectAlt(idx: number) {
-    const r = allResults[idx];
-    setSelectedIdx(idx);
-    onUpdateForm({
-      area: r.area,
-      demandScore: String(r.suggestedDemandScore),
-      liquidityScore: String(r.suggestedLiquidityScore),
-      medianPrice: r.suggestedMedianPrice > 0 ? String(r.suggestedMedianPrice) : '',
-    });
+  // List mode: ada demandRanking (hasil auto-discover)
+  if (result.demandRanking && result.demandRanking.length > 0) {
+    return (
+      <ListApprovalMode
+        result={result}
+        onDismiss={onDismiss}
+        onAllSaved={onApprove}
+      />
+    );
   }
-
+  // Single mode: area diisi manual atau riset ulang satu row
   return (
-    <div className="rounded-xl border-2 border-blue-200 bg-blue-50/60 p-5 space-y-4">
-      {/* Header */}
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex items-center gap-2">
-          {active.method === 'PORTAL_DATA'
-            ? <Globe className="w-4 h-4 text-blue-600 shrink-0" />
-            : <Brain className="w-4 h-4 text-blue-600 shrink-0" />}
-          <div>
-            <p className="text-sm font-semibold text-blue-800">
-              {result.areaWasSuggested ? `Rekomendasi Area AI — ${result.city}` : `Hasil Riset AI — ${active.area}, ${active.city}`}
-            </p>
-            <p className="text-xs text-blue-600">
-              {active.method === 'PORTAL_DATA'
-                ? `Data Portal (rumah123 · lamudi · OLX)`
-                : 'Estimasi Groq Knowledge'} ·{' '}
-              Keyakinan: <ConfidenceBadge confidence={active.confidence} />
-            </p>
-          </div>
-        </div>
-        <button onClick={onDismiss} className="text-blue-400 hover:text-blue-600 p-1">
-          <XCircle className="w-4 h-4" />
-        </button>
-      </div>
-
-      {/* Alternative area tabs — shown when AI suggests area */}
-      {result.areaWasSuggested && allResults.length > 1 && (
-        <div className="space-y-1.5">
-          <p className="text-xs font-semibold text-blue-700">Pilih kecamatan — klik untuk bandingkan</p>
-          <div className="flex flex-wrap gap-2">
-            {allResults.map((r, i) => (
-              <button
-                key={i}
-                onClick={() => selectAlt(i)}
-                className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
-                  selectedIdx === i
-                    ? 'bg-blue-600 text-white border-blue-600'
-                    : 'bg-white text-blue-700 border-blue-200 hover:bg-blue-50'
-                }`}
-              >
-                {r.area}
-                <span className={`ml-1.5 ${selectedIdx === i ? 'text-blue-200' : 'text-blue-400'}`}>
-                  D:{r.suggestedDemandScore}
-                </span>
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Editable area name (for suggested or single-area) */}
-      {result.areaWasSuggested && (
-        <div className="rounded-lg bg-blue-100/60 border border-blue-200 px-4 py-3 space-y-1">
-          <p className="text-xs font-semibold text-blue-700">Area yang Dipilih — edit jika perlu</p>
-          <input
-            type="text"
-            value={form.area}
-            onChange={(e) => onUpdateForm({ area: e.target.value })}
-            placeholder="Nama kecamatan / area..."
-            className="w-full rounded-lg border border-blue-300 bg-white px-3 py-2 text-sm font-medium text-blue-800 focus:outline-none focus:ring-2 focus:ring-blue-400"
-          />
-        </div>
-      )}
-
-      {/* AI Reasoning */}
-      <div className="rounded-lg bg-white border border-blue-100 px-4 py-3 text-sm text-gray-700 leading-relaxed">
-        {active.reasoning}
-      </div>
-
-      {/* Portal stats */}
-      {active.portalStats && active.portalStats.some((p) => p.listingCount > 0) && (
-        <div className="rounded-lg bg-white border border-blue-100 px-4 py-3">
-          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
-            Estimasi Listing Aktif per Portal
-          </p>
-          <div className="grid grid-cols-3 gap-2">
-            {active.portalStats.map((p) => (
-              <div key={p.portal} className="text-center">
-                <p className="text-xs text-gray-400 truncate">{p.portal}</p>
-                <p className="text-sm font-bold text-blue-700">
-                  {p.listingCount > 0 ? `~${p.listingCount.toLocaleString('id-ID')} listing` : '—'}
-                </p>
-              </div>
-            ))}
-          </div>
-          <p className="text-xs text-gray-400 mt-2">* Harga median per m² diisi manual setelah approve</p>
-        </div>
-      )}
-
-      {/* Sources */}
-      {active.sources.length > 0 && (
-        <div className="flex flex-wrap gap-1.5">
-          {active.sources.slice(0, 4).map((src, i) => {
-            const domain = new URL(src).hostname.replace('www.', '');
-            return (
-              <a key={i} href={src} target="_blank" rel="noopener noreferrer"
-                className="inline-flex items-center gap-1 text-xs bg-white border border-blue-200 text-blue-700 px-2 py-1 rounded-full hover:bg-blue-100 transition-colors">
-                {domain} <ExternalLink className="w-2.5 h-2.5" />
-              </a>
-            );
-          })}
-        </div>
-      )}
-
-      {/* Suggested scores — editable before approving */}
-      <div className="bg-white rounded-xl border border-blue-100 p-4 space-y-3">
-        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Skor yang Disarankan — Edit jika perlu</p>
-        <div className="grid grid-cols-3 gap-3">
-          <div>
-            <label className="text-xs text-gray-500 block mb-1">Demand Score</label>
-            <input type="number" min="0" max="100"
-              value={form.demandScore}
-              onChange={(e) => onUpdateForm({ demandScore: e.target.value })}
-              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-semibold text-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-400"
-            />
-          </div>
-          <div>
-            <label className="text-xs text-gray-500 block mb-1">Liquidity Score</label>
-            <input type="number" min="0" max="100"
-              value={form.liquidityScore}
-              onChange={(e) => onUpdateForm({ liquidityScore: e.target.value })}
-              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-semibold text-emerald-700 focus:outline-none focus:ring-2 focus:ring-blue-400"
-            />
-          </div>
-          <div>
-            <label className="text-xs text-gray-500 block mb-1">Median Harga (Rp)</label>
-            <input type="number" min="0"
-              value={form.medianPrice}
-              onChange={(e) => onUpdateForm({ medianPrice: e.target.value })}
-              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
-            />
-          </div>
-        </div>
-        <div>
-          <label className="text-xs text-gray-500 block mb-1">Catatan Sumber</label>
-          <input type="text"
-            value={form.sourceNote}
-            onChange={(e) => onUpdateForm({ sourceNote: e.target.value })}
-            placeholder={`Riset AI (${active.method === 'PORTAL_DATA' ? 'Portal Data' : 'Groq Knowledge'}) — ${new Date().toLocaleDateString('id-ID')}`}
-            className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
-          />
-        </div>
-      </div>
-
-      {/* Actions */}
-      <div className="flex justify-end gap-2">
-        <Button variant="secondary" onClick={onDismiss}>Tolak</Button>
-        <Button onClick={onApprove} loading={saving}>
-          <CheckCircle className="w-4 h-4" /> Approve & Simpan
-        </Button>
-      </div>
-    </div>
+    <SingleAreaCard
+      result={result}
+      form={form}
+      onUpdateForm={onUpdateForm}
+      onApprove={onApprove}
+      onDismiss={onDismiss}
+      saving={saving}
+    />
   );
 }
 

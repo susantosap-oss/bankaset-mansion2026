@@ -1,7 +1,21 @@
 import { NextRequest } from 'next/server';
-import { getAssetRepository } from '@/lib/container';
+import { getAssetRepository, getAreaIntelligenceRepository } from '@/lib/container';
 import { ok, err } from '@/lib/api';
 import { AssetFilter } from '@/repositories/interfaces/IAssetRepository';
+import { Asset } from '@/domain/entities/Asset';
+import { canonicalize } from '@/lib/cityUtils';
+
+// Sellable: lulus quality filter + area ada di database intelligence dengan demand >= 40
+function isSellable(
+  asset: Asset,
+  areaEntry: { demandScore: number } | undefined,
+): boolean {
+  if (!areaEntry) return false;
+  if (areaEntry.demandScore < 40) return false;
+  // liquidationRatio check sudah dilakukan oleh minLiquidationRatioPct filter
+  // LTV check sudah dilakukan oleh minLtvPct filter
+  return true;
+}
 
 // PUBLIC — read access
 export async function GET(req: NextRequest) {
@@ -13,17 +27,46 @@ export async function GET(req: NextRequest) {
       area: searchParams.get('area') ?? undefined,
       status: (searchParams.get('status') as AssetFilter['status']) ?? undefined,
       search: searchParams.get('search') ?? undefined,
-      // Business rule: tampilkan hanya asset dengan data keuangan yang viable
-      minLiquidationRatioPct: 2,     // Sisa Pokok/Outstanding >= 2%
-      minLtvPct: 1,                  // Outstanding/Nilai Pasar >= 1%
+      minLiquidationRatioPct: 2,
+      minLtvPct: 1,
       sortBy: 'liquidationRatio',
       sortDir: 'desc',
     };
     const page = parseInt(searchParams.get('page') ?? '1');
     const limit = Math.min(parseInt(searchParams.get('limit') ?? '20'), 100);
 
-    const result = await getAssetRepository().findAll(filter, { page, limit });
-    return ok(result.data, {
+    // Parallel: ambil assets + area intelligence
+    const [result, allAreas] = await Promise.all([
+      getAssetRepository().findAll(filter, { page, limit }),
+      getAreaIntelligenceRepository().findAll(),
+    ]);
+
+    // Bangun map: canonical city → entry dengan demand tertinggi
+    const cityAreaMap = new Map<string, { demandScore: number; medianPrice: number; areaName: string }>();
+    for (const ai of allAreas) {
+      const key = canonicalize(ai.city).toLowerCase();
+      const existing = cityAreaMap.get(key);
+      if (!existing || ai.final.demandScore > existing.demandScore) {
+        cityAreaMap.set(key, {
+          demandScore: ai.final.demandScore,
+          medianPrice: ai.final.medianPrice,
+          areaName: ai.area,
+        });
+      }
+    }
+
+    // Enrichment: tambahkan marketPriceEst & sellable ke setiap asset
+    const enriched = result.data.map((asset) => {
+      const cityKey = canonicalize(asset.city).toLowerCase();
+      const areaEntry = cityAreaMap.get(cityKey);
+      return {
+        ...asset,
+        marketPriceEst: areaEntry?.medianPrice ?? null,
+        sellable: isSellable(asset, areaEntry),
+      };
+    });
+
+    return ok(enriched, {
       total: result.total,
       page: result.page,
       limit: result.limit,

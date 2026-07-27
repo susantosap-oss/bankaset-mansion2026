@@ -248,30 +248,52 @@ export class GoogleSheetAssetRepository implements IAssetRepository {
   /**
    * Tulis semua sellable assets (sudah difilter + diurutkan) ke sheet tab SSoT.
    * Sheet dibuat otomatis jika belum ada. Isi lama di-clear dulu.
+   * options.areaMap: canonical city (lowercase) → { medianPrice, demandScore, topArea }
    */
   async exportSellable(
     filter: import('@/repositories/interfaces/IAssetRepository').AssetFilter,
-    sheetName = 'Asset Sellable'
+    sheetName = 'Asset Sellable',
+    options?: {
+      areaMap?: Map<string, { medianPrice: number; demandScore: number; topArea: string }>;
+    },
   ): Promise<number> {
     const { data: assets } = await this.findAll(filter, { page: 1, limit: 9999 });
+    const areaMap = options?.areaMap;
+
+    function getCityKey(city: string): string {
+      return city.trim().toLowerCase().replace(/^kota\s+/, '').replace(/^kabupaten\s+/, '');
+    }
+
+    function isSellable(asset: Asset, entry: { demandScore: number } | undefined): boolean {
+      if (!entry || entry.demandScore < 40) return false;
+      return true;
+    }
 
     const HEADER = [
       'Asset ID', 'Bank', 'Tipe Aset', 'Kota', 'Kecamatan', 'Area/Kelurahan',
       'Alamat Lengkap', 'Nilai Pasar', 'Outstanding', 'Sisa Pokok',
       'Luas Tanah (m²)', 'Luas Bangunan (m²)', 'Debitur',
-      'Rasio Sisa Pokok/Outstanding', 'Nilai Likuidasi', 'Status',
+      'Rasio Sisa Pokok/Outstanding', 'Nilai Likuidasi',
+      'Harga_Pasar_Est (Rp/m²)', 'Sellable', 'Status',
       'Dibuat', 'Diperbarui',
     ];
 
     const rows: unknown[][] = [
       HEADER,
-      ...assets.map((a) => [
-        a.assetId, a.bankName, a.assetType, a.city, a.district, a.area,
-        a.address, a.marketValue, a.outstanding, a.principalOutstanding ?? '',
-        a.landArea, a.buildingArea, a.debtorName ?? '',
-        a.liquidationRatio ?? '', a.liquidationValue ?? '',
-        a.status, a.createdAt, a.updatedAt,
-      ]),
+      ...assets.map((a) => {
+        const cityKey = getCityKey(a.city);
+        const entry = areaMap?.get(cityKey);
+        const hargaPasarEst = entry?.medianPrice && entry.medianPrice > 0 ? entry.medianPrice : '';
+        const sellable = isSellable(a, entry) ? 'Ya' : 'Tidak';
+        return [
+          a.assetId, a.bankName, a.assetType, a.city, a.district, a.area,
+          a.address, a.marketValue, a.outstanding, a.principalOutstanding ?? '',
+          a.landArea, a.buildingArea, a.debtorName ?? '',
+          a.liquidationRatio ?? '', a.liquidationValue ?? '',
+          hargaPasarEst, sellable,
+          a.status, a.createdAt, a.updatedAt,
+        ];
+      }),
     ];
 
     await this.client.overwriteSheet(this.spreadsheetId, sheetName, rows);
