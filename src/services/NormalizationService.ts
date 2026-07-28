@@ -146,6 +146,7 @@ export class NormalizationService {
       case 'principal_outstanding': asset.principalOutstanding = this.parseCurrency(value); break;
       case 'liquidation_ratio': asset.liquidationRatio = parseFloat(value.replace(/[^0-9.]/g, '')) || 0; break;
       case 'liquidation_value': asset.liquidationValue = this.parseCurrency(value); break;
+      case 'limit_price': asset.limitPrice = this.parseCurrency(value); break;
     }
   }
 

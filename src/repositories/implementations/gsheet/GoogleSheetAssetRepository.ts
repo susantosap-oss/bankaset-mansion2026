@@ -19,7 +19,7 @@ const COLS = [
   'address', 'marketValue', 'outstanding', 'landArea', 'buildingArea',
   'status', 'createdAt', 'updatedAt', 'rawRowRef',
   'debtorName', 'principalOutstanding', 'liquidationRatio', 'liquidationValue',
-  'certificateType',
+  'certificateType', 'limitPrice',
 ] as const;
 
 function rowToAsset(row: string[]): Asset | null {
@@ -45,6 +45,7 @@ function rowToAsset(row: string[]): Asset | null {
     liquidationRatio: row[17] ? parseFloat(row[17]) || undefined : undefined,
     liquidationValue: row[18] ? parseFloat(row[18]) || undefined : undefined,
     certificateType: row[19] || undefined,
+    limitPrice: row[20] ? parseFloat(row[20]) || 0 : 0,
   };
 }
 
@@ -59,6 +60,7 @@ function assetToRow(asset: Asset): string[] {
     asset.liquidationRatio != null ? String(asset.liquidationRatio) : '',
     asset.liquidationValue != null ? String(asset.liquidationValue) : '',
     asset.certificateType ?? '',
+    asset.limitPrice != null ? String(asset.limitPrice) : '0',
   ];
 }
 

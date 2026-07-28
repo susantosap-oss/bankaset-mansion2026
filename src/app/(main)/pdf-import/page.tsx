@@ -306,6 +306,7 @@ export default function PDFImportPage() {
                         <th className="text-left px-3 py-3 font-medium text-gray-600 min-w-[200px]">Alamat</th>
                         <th className="text-right px-3 py-3 font-medium text-gray-600">Nilai Pasar</th>
                         <th className="text-right px-3 py-3 font-medium text-gray-600">Outstanding</th>
+                        <th className="text-right px-3 py-3 font-medium text-gray-600">Harga Limit</th>
                         <th className="text-right px-3 py-3 font-medium text-gray-600">LT (m²)</th>
                         <th className="text-right px-3 py-3 font-medium text-gray-600">LB (m²)</th>
                         <th className="text-left px-3 py-3 font-medium text-gray-600">Debitur</th>
@@ -331,6 +332,7 @@ export default function PDFImportPage() {
                           <EditCell value={asset.address} onChange={(v) => updateAsset(idx, 'address', v)} wide />
                           <EditCell value={String(asset.marketValue)} onChange={(v) => updateAsset(idx, 'marketValue', Number(v))} align="right" />
                           <EditCell value={String(asset.outstanding)} onChange={(v) => updateAsset(idx, 'outstanding', Number(v))} align="right" />
+                          <EditCell value={String(asset.limitPrice ?? 0)} onChange={(v) => updateAsset(idx, 'limitPrice', Number(v))} align="right" />
                           <EditCell value={String(asset.landArea)} onChange={(v) => updateAsset(idx, 'landArea', Number(v))} align="right" />
                           <EditCell value={String(asset.buildingArea)} onChange={(v) => updateAsset(idx, 'buildingArea', Number(v))} align="right" />
                           <EditCell value={asset.debtorName} onChange={(v) => updateAsset(idx, 'debtorName', v)} />

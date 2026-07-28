@@ -59,6 +59,7 @@ Setiap aset harus memiliki field berikut (gunakan 0 atau "" jika tidak ditemukan
 - debtorName: nama debitur (string kosong jika tidak ada)
 - principalOutstanding: integer pokok kredit dalam rupiah (0 jika tidak ada)
 - liquidationValue: integer nilai likuidasi dalam rupiah (0 jika tidak ada)
+- limitPrice: integer harga limit/harga dasar lelang dalam rupiah (0 jika tidak ada)
 
 Teks dokumen:
 ${pageText.slice(0, PAGE_TEXT_LIMIT)}`;
@@ -103,6 +104,7 @@ ${pageText.slice(0, PAGE_TEXT_LIMIT)}`;
         principalOutstanding: Number(item.principalOutstanding ?? 0),
         liquidationRatio: 0,
         liquidationValue: Number(item.liquidationValue ?? 0),
+        limitPrice: Number(item.limitPrice ?? 0),
         pageNumber,
         confidence: deriveConfidence(item),
         rawText: pageText.slice(0, 300),

@@ -96,6 +96,7 @@ export async function POST(req: NextRequest) {
         principalOutstanding: asset.principalOutstanding,
         liquidationRatio: asset.liquidationRatio,
         liquidationValue: asset.liquidationValue,
+        limitPrice: asset.limitPrice ?? 0,
       });
     }
 

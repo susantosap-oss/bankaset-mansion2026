@@ -75,6 +75,7 @@ export async function POST(req: NextRequest) {
         principalOutstanding: a.principalOutstanding || undefined,
         liquidationRatio: a.liquidationRatio || undefined,
         liquidationValue: a.liquidationValue || undefined,
+        limitPrice: a.limitPrice ?? 0,
       });
     }
 

@@ -13,6 +13,7 @@ export interface PDFExtractedAsset {
   principalOutstanding: number;
   liquidationRatio: number;
   liquidationValue: number;
+  limitPrice: number;
   pageNumber: number;
   confidence: 'HIGH' | 'MEDIUM' | 'LOW';
   rawText: string;

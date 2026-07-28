@@ -23,6 +23,7 @@ export interface Asset {
   readonly liquidationRatio?: number;
   readonly liquidationValue?: number;
   readonly certificateType?: string;
+  readonly limitPrice?: number;
 }
 
 // Mutable version for building assets during normalization
@@ -45,6 +46,7 @@ export interface AssetDraft {
   liquidationRatio?: number;
   liquidationValue?: number;
   certificateType?: string;
+  limitPrice?: number;
 }
 
 export type CreateAssetInput = AssetDraft;
