@@ -78,6 +78,7 @@ function StepBar({ current }: { current: Step }) {
 // ── Main component ─────────────────────────────────────────────────
 export default function ImportPage() {
   const [step, setStep] = useState<Step>('upload');
+  const [sourceType, setSourceType] = useState<'Bank' | 'Balai Lelang'>('Bank');
   const [bankName, setBankName] = useState('');
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<PreviewData | null>(null);
@@ -90,6 +91,7 @@ export default function ImportPage() {
 
   const reset = useCallback(() => {
     setStep('upload');
+    setSourceType('Bank');
     setBankName('');
     setFile(null);
     setPreview(null);
@@ -103,7 +105,7 @@ export default function ImportPage() {
   // Step 1: Analyze file
   async function handleAnalyze() {
     if (!file || !bankName.trim()) {
-      setError('Pilih file dan isi nama bank');
+      setError('Pilih file dan isi nama source (bank/balai lelang)');
       return;
     }
     setLoading(true);
@@ -183,13 +185,37 @@ export default function ImportPage() {
             <h3 className="font-semibold text-gray-800">Upload File Asset</h3>
           </CardHeader>
           <CardContent className="space-y-5">
-            <Input
-              id="bankName"
-              label="Nama Bank / Sumber Data"
-              placeholder="cth: BRI, BNI, BTN, CIMB Niaga"
-              value={bankName}
-              onChange={(e) => setBankName(e.target.value)}
-            />
+            <div>
+              <label className="text-xs font-medium text-gray-600 block mb-1.5">
+                Source <span className="text-gray-400 font-normal">(isi jika file tidak memuat nama sumber)</span>
+              </label>
+              <div className="flex mb-2">
+                {(['Bank', 'Balai Lelang'] as const).map((t) => (
+                  <button
+                    key={t}
+                    type="button"
+                    onClick={() => setSourceType(t)}
+                    className={`px-3 py-1.5 text-xs font-medium border transition-colors first:rounded-l-lg last:rounded-r-lg ${
+                      sourceType === t
+                        ? 'bg-blue-600 text-white border-blue-600'
+                        : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'
+                    }`}
+                  >
+                    {t}
+                  </button>
+                ))}
+              </div>
+              <Input
+                id="bankName"
+                placeholder={
+                  sourceType === 'Bank'
+                    ? 'cth: BRI, BNI, BTN, CIMB Niaga'
+                    : 'cth: KPKNL Surabaya, Balai Lelang PT. XYZ'
+                }
+                value={bankName}
+                onChange={(e) => setBankName(e.target.value)}
+              />
+            </div>
 
             <div>
               <label className="text-xs font-medium text-gray-600 block mb-1">File Excel / CSV</label>

@@ -273,7 +273,7 @@ export class GoogleSheetAssetRepository implements IAssetRepository {
     }
 
     const HEADER = [
-      'Asset ID', 'Bank', 'Tipe Aset', 'Kota', 'Kecamatan', 'Area/Kelurahan',
+      'Asset ID', 'Source', 'Tipe Aset', 'Kota', 'Kecamatan', 'Area/Kelurahan',
       'Alamat Lengkap', 'Nilai Pasar', 'Outstanding', 'Sisa Pokok',
       'LT (m²)', 'LB (m²)', 'Tipe Sertifikat', 'Debitur',
       'Rasio Sisa Pokok/Outstanding', 'Nilai Likuidasi',

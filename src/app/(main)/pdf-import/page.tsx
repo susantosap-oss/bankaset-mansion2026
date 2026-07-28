@@ -74,6 +74,7 @@ function ConfidenceBadge({ confidence }: { confidence: string }) {
 // ── Main component ─────────────────────────────────────────────────
 export default function PDFImportPage() {
   const [step, setStep] = useState<Step>('upload');
+  const [sourceType, setSourceType] = useState<'Bank' | 'Balai Lelang'>('Bank');
   const [bankName, setBankName] = useState('');
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<PDFPreviewData | null>(null);
@@ -85,6 +86,7 @@ export default function PDFImportPage() {
 
   const reset = useCallback(() => {
     setStep('upload');
+    setSourceType('Bank');
     setBankName('');
     setFile(null);
     setPreview(null);
@@ -97,7 +99,7 @@ export default function PDFImportPage() {
   // Step 1: Upload & extract
   async function handleExtract() {
     if (!file || !bankName.trim()) {
-      setError('Pilih file PDF dan isi nama bank');
+      setError('Pilih file PDF dan isi nama source (bank/balai lelang)');
       return;
     }
     setLoading(true);
@@ -176,13 +178,37 @@ export default function PDFImportPage() {
             <h3 className="font-semibold text-gray-800">Upload Dokumen PDF</h3>
           </CardHeader>
           <CardContent className="space-y-5">
-            <Input
-              id="bankName"
-              label="Nama Bank / Sumber Data"
-              placeholder="cth: BRI, BNI, BTN, CIMB Niaga"
-              value={bankName}
-              onChange={(e) => setBankName(e.target.value)}
-            />
+            <div>
+              <label className="text-xs font-medium text-gray-600 block mb-1.5">
+                Source <span className="text-gray-400 font-normal">(isi jika file tidak memuat nama sumber)</span>
+              </label>
+              <div className="flex mb-2">
+                {(['Bank', 'Balai Lelang'] as const).map((t) => (
+                  <button
+                    key={t}
+                    type="button"
+                    onClick={() => setSourceType(t)}
+                    className={`px-3 py-1.5 text-xs font-medium border transition-colors first:rounded-l-lg last:rounded-r-lg ${
+                      sourceType === t
+                        ? 'bg-blue-600 text-white border-blue-600'
+                        : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'
+                    }`}
+                  >
+                    {t}
+                  </button>
+                ))}
+              </div>
+              <Input
+                id="bankName"
+                placeholder={
+                  sourceType === 'Bank'
+                    ? 'cth: BRI, BNI, BTN, CIMB Niaga'
+                    : 'cth: KPKNL Surabaya, Balai Lelang PT. XYZ'
+                }
+                value={bankName}
+                onChange={(e) => setBankName(e.target.value)}
+              />
+            </div>
 
             <div>
               <label className="text-xs font-medium text-gray-600 block mb-1">File PDF</label>
