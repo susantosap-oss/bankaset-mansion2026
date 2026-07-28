@@ -278,7 +278,7 @@ export class GoogleSheetAssetRepository implements IAssetRepository {
       'Asset ID', 'Source', 'Tipe Aset', 'Kota', 'Kecamatan', 'Area/Kelurahan',
       'Alamat Lengkap', 'Nilai Pasar', 'Outstanding', 'Sisa Pokok',
       'LT (m²)', 'LB (m²)', 'Tipe Sertifikat', 'Debitur',
-      'Rasio Sisa Pokok/Outstanding', 'Nilai Likuidasi',
+      'Rasio Sisa Pokok/Outstanding', 'Nilai Likuidasi', 'Harga Limit',
       'Harga_Pasar_Est (Rp/m²)', 'Demand Score (AI)', 'Sellable', 'Status',
       'Dibuat', 'Diperbarui',
     ];
@@ -299,6 +299,7 @@ export class GoogleSheetAssetRepository implements IAssetRepository {
           a.certificateType || '-',
           a.debtorName ?? '-',
           a.liquidationRatio ?? '', a.liquidationValue ?? '',
+          a.limitPrice != null && a.limitPrice > 0 ? a.limitPrice : '-',
           hargaPasarEst, demandScore, sellable,
           a.status, a.createdAt, a.updatedAt,
         ];
