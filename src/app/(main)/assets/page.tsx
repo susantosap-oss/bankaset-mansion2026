@@ -178,6 +178,7 @@ export default function AssetsPage() {
               <thead>
                 <tr className="bg-gray-50 border-b border-gray-100">
                   <th className="text-left px-3 py-2 font-medium text-gray-500 whitespace-nowrap">Bank</th>
+                  <th className="text-center px-3 py-2 font-medium text-gray-500 whitespace-nowrap">Label Asset</th>
                   <th className="text-left px-3 py-2 font-medium text-gray-500 whitespace-nowrap">Tipe</th>
                   <th className="text-left px-3 py-2 font-medium text-gray-500 whitespace-nowrap">Kota</th>
                   <th className="text-left px-3 py-2 font-medium text-gray-500">Alamat</th>
@@ -190,7 +191,6 @@ export default function AssetsPage() {
                   <th className="text-right px-3 py-2 font-medium text-gray-500 whitespace-nowrap">Sisa Pokok</th>
                   <th className="text-right px-3 py-2 font-medium text-gray-500 whitespace-nowrap">Rasio</th>
                   <th className="text-right px-3 py-2 font-medium text-gray-500 whitespace-nowrap">Likuidasi</th>
-                  <th className="text-center px-3 py-2 font-medium text-gray-500 whitespace-nowrap">Label Asset</th>
                   <th className="text-right px-3 py-2 font-medium text-gray-500 whitespace-nowrap">Harga Limit</th>
                   <th className="text-right px-3 py-2 font-medium text-gray-500 whitespace-nowrap">Harga Pasar Est</th>
                   <th className="text-center px-3 py-2 font-medium text-gray-500 whitespace-nowrap">Demand</th>
@@ -203,6 +203,13 @@ export default function AssetsPage() {
                 {assets?.data.map((asset) => (
                   <tr key={asset.assetId} className="hover:bg-gray-50/60 transition-colors align-top">
                     <td className="px-3 py-2 font-medium text-gray-900 whitespace-nowrap">{asset.bankName}</td>
+                    <td className="px-3 py-2 text-center whitespace-nowrap">
+                      {asset.labelAsset
+                        ? <Badge variant={asset.labelAsset === 'CASSIE' ? 'info' : 'warning'}>
+                            {ASSET_LABEL_LABELS[asset.labelAsset]}
+                          </Badge>
+                        : <span className="text-gray-400">—</span>}
+                    </td>
                     <td className="px-3 py-2 text-gray-600 whitespace-nowrap">
                       {ASSET_TYPE_LABELS[asset.assetType] ?? asset.assetType}
                     </td>
@@ -237,13 +244,6 @@ export default function AssetsPage() {
                     </td>
                     <td className="px-3 py-2 text-right text-gray-700 whitespace-nowrap">
                       {fmtRp(asset.liquidationValue)}
-                    </td>
-                    <td className="px-3 py-2 text-center whitespace-nowrap">
-                      {asset.labelAsset
-                        ? <Badge variant={asset.labelAsset === 'CASSIE' ? 'info' : 'warning'}>
-                            {ASSET_LABEL_LABELS[asset.labelAsset]}
-                          </Badge>
-                        : <span className="text-gray-400">—</span>}
                     </td>
                     <td className="px-3 py-2 text-right text-gray-700 whitespace-nowrap">
                       {asset.limitPrice && asset.limitPrice > 0 ? fmtRp(asset.limitPrice) : '—'}
