@@ -119,7 +119,7 @@ export default function PDFImportPage() {
       const data: PDFPreviewData = json.data;
       setPreview(data);
       setAssets(labelAsset === 'CASSIE'
-        ? data.assets.map((a) => ({ ...a, limitPrice: (a.principalOutstanding || 0) }))
+        ? data.assets.map((a) => ({ ...a, limitPrice: (a.outstanding || 0) }))
         : data.assets);
       setStep('review');
     } catch (e: unknown) {
@@ -135,7 +135,7 @@ export default function PDFImportPage() {
       if (i !== idx) return a;
       const updated = { ...a, [field]: value };
       // Cassie: Harga Limit = Harga Outstanding
-      if (labelAsset === 'CASSIE' && field === 'principalOutstanding') {
+      if (labelAsset === 'CASSIE' && field === 'outstanding') {
         updated.limitPrice = Number(value);
       }
       return updated;

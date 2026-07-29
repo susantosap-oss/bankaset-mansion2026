@@ -66,7 +66,7 @@ export async function POST(req: NextRequest) {
       // Label Asset menentukan Harga Limit:
       // Cassie -> Harga Outstanding; Lelang -> Harga Limit hasil ekstraksi (Harga Lelang)
       const limitPrice = labelAsset === 'CASSIE'
-        ? (a.principalOutstanding || 0)
+        ? (a.outstanding || 0)
         : (a.limitPrice ?? 0);
 
       toSave.push({
