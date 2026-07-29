@@ -119,7 +119,7 @@ export default function PDFImportPage() {
       const data: PDFPreviewData = json.data;
       setPreview(data);
       setAssets(labelAsset === 'CASSIE'
-        ? data.assets.map((a) => ({ ...a, limitPrice: (a.principalOutstanding || 0) * 1.03 }))
+        ? data.assets.map((a) => ({ ...a, limitPrice: (a.principalOutstanding || 0) }))
         : data.assets);
       setStep('review');
     } catch (e: unknown) {
@@ -134,9 +134,9 @@ export default function PDFImportPage() {
     setAssets((prev) => prev.map((a, i) => {
       if (i !== idx) return a;
       const updated = { ...a, [field]: value };
-      // Cassie: Harga Limit selalu mengikuti Nilai Pokok Hutang + 3%
+      // Cassie: Harga Limit = Harga Outstanding
       if (labelAsset === 'CASSIE' && field === 'principalOutstanding') {
-        updated.limitPrice = Number(value) * 1.03;
+        updated.limitPrice = Number(value);
       }
       return updated;
     }));
@@ -239,7 +239,7 @@ export default function PDFImportPage() {
               </Select>
               <p className="text-xs text-gray-400 mt-1">
                 {labelAsset === 'CASSIE'
-                  ? 'Harga Limit = Nilai Pokok Hutang + 3%'
+                  ? 'Harga Limit = Harga Outstanding'
                   : 'Harga Limit = Harga Lelang (hasil ekstraksi AI)'}
               </p>
             </div>
