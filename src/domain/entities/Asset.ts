@@ -1,5 +1,6 @@
 import { AssetType } from '@/domain/value-objects/AssetType';
 import { AssetStatus } from '@/domain/value-objects/AssetStatus';
+import { AssetLabel } from '@/domain/value-objects/AssetLabel';
 
 export interface Asset {
   readonly assetId: string;
@@ -24,6 +25,7 @@ export interface Asset {
   readonly liquidationValue?: number;
   readonly certificateType?: string;
   readonly limitPrice?: number;
+  readonly labelAsset?: AssetLabel;
 }
 
 // Mutable version for building assets during normalization
@@ -47,6 +49,7 @@ export interface AssetDraft {
   liquidationValue?: number;
   certificateType?: string;
   limitPrice?: number;
+  labelAsset?: AssetLabel;
 }
 
 export type CreateAssetInput = AssetDraft;

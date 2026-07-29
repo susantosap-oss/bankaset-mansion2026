@@ -5,9 +5,11 @@ import { FileText, CheckCircle, XCircle, ChevronRight, RotateCcw, ExternalLink, 
 import Link from 'next/link';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
+import { Select } from '@/components/ui/Select';
 import { Badge } from '@/components/ui/Badge';
 import { Card, CardHeader, CardContent } from '@/components/ui/Card';
 import type { PDFExtractedAsset } from '@/types/pdf';
+import { AssetLabel, ASSET_LABEL_LABELS, ALL_ASSET_LABELS } from '@/domain/value-objects/AssetLabel';
 
 // ── Types ──────────────────────────────────────────────────────────
 interface PDFPreviewData {
@@ -76,6 +78,7 @@ export default function PDFImportPage() {
   const [step, setStep] = useState<Step>('upload');
   const [sourceType, setSourceType] = useState<'Bank' | 'Balai Lelang'>('Bank');
   const [bankName, setBankName] = useState('');
+  const [labelAsset, setLabelAsset] = useState<AssetLabel>('LELANG');
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<PDFPreviewData | null>(null);
   const [assets, setAssets] = useState<PDFExtractedAsset[]>([]);
@@ -88,6 +91,7 @@ export default function PDFImportPage() {
     setStep('upload');
     setSourceType('Bank');
     setBankName('');
+    setLabelAsset('LELANG');
     setFile(null);
     setPreview(null);
     setAssets([]);
@@ -114,7 +118,9 @@ export default function PDFImportPage() {
 
       const data: PDFPreviewData = json.data;
       setPreview(data);
-      setAssets(data.assets);
+      setAssets(labelAsset === 'CASSIE'
+        ? data.assets.map((a) => ({ ...a, limitPrice: (a.principalOutstanding || 0) * 1.03 }))
+        : data.assets);
       setStep('review');
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Terjadi kesalahan');
@@ -125,7 +131,15 @@ export default function PDFImportPage() {
 
   // Edit asset field
   function updateAsset(idx: number, field: keyof PDFExtractedAsset, value: string | number) {
-    setAssets((prev) => prev.map((a, i) => i === idx ? { ...a, [field]: value } : a));
+    setAssets((prev) => prev.map((a, i) => {
+      if (i !== idx) return a;
+      const updated = { ...a, [field]: value };
+      // Cassie: Harga Limit selalu mengikuti Nilai Pokok Hutang + 3%
+      if (labelAsset === 'CASSIE' && field === 'principalOutstanding') {
+        updated.limitPrice = Number(value) * 1.03;
+      }
+      return updated;
+    }));
   }
 
   // Remove asset
@@ -142,7 +156,7 @@ export default function PDFImportPage() {
       const res = await fetch('/api/import/pdf/confirm', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ bankName: preview.bankName, assets }),
+        body: JSON.stringify({ bankName: preview.bankName, assets, labelAsset }),
       });
       const json = await res.json();
       if (!res.ok || json.error) throw new Error(json.error?.message ?? json.message ?? `Error ${res.status}`);
@@ -211,6 +225,26 @@ export default function PDFImportPage() {
             </div>
 
             <div>
+              <label className="text-xs font-medium text-gray-600 block mb-1.5">
+                Label Asset <span className="text-gray-400 font-normal">(menentukan cara hitung Harga Limit)</span>
+              </label>
+              <Select
+                id="labelAsset"
+                value={labelAsset}
+                onChange={(e) => setLabelAsset(e.target.value as AssetLabel)}
+              >
+                {ALL_ASSET_LABELS.map((l) => (
+                  <option key={l} value={l}>{ASSET_LABEL_LABELS[l]}</option>
+                ))}
+              </Select>
+              <p className="text-xs text-gray-400 mt-1">
+                {labelAsset === 'CASSIE'
+                  ? 'Harga Limit = Nilai Pokok Hutang + 3%'
+                  : 'Harga Limit = Harga Lelang (hasil ekstraksi AI)'}
+              </p>
+            </div>
+
+            <div>
               <label className="text-xs font-medium text-gray-600 block mb-1">File PDF</label>
               <div
                 className="border-2 border-dashed border-gray-300 rounded-xl p-8 text-center cursor-pointer hover:border-blue-400 hover:bg-blue-50/40 transition-colors"
@@ -262,7 +296,10 @@ export default function PDFImportPage() {
                   <StatItem label="Asset Ditemukan" value={preview.assets.length} />
                   <StatItem label="Siap Disimpan" value={assets.length} />
                 </div>
-                <Badge variant="info">{preview.bankName}</Badge>
+                <div className="flex items-center gap-2">
+                  <Badge variant="info">{preview.bankName}</Badge>
+                  <Badge variant="default">Label: {ASSET_LABEL_LABELS[labelAsset]}</Badge>
+                </div>
               </div>
             </CardContent>
           </Card>
@@ -332,7 +369,13 @@ export default function PDFImportPage() {
                           <EditCell value={asset.address} onChange={(v) => updateAsset(idx, 'address', v)} wide />
                           <EditCell value={String(asset.marketValue)} onChange={(v) => updateAsset(idx, 'marketValue', Number(v))} align="right" />
                           <EditCell value={String(asset.outstanding)} onChange={(v) => updateAsset(idx, 'outstanding', Number(v))} align="right" />
-                          <EditCell value={String(asset.limitPrice ?? 0)} onChange={(v) => updateAsset(idx, 'limitPrice', Number(v))} align="right" />
+                          {labelAsset === 'CASSIE' ? (
+                            <td className="px-3 py-2 text-right text-gray-500" title="Otomatis: Nilai Pokok Hutang + 3%">
+                              {Math.round(asset.limitPrice ?? 0).toLocaleString('id-ID')}
+                            </td>
+                          ) : (
+                            <EditCell value={String(asset.limitPrice ?? 0)} onChange={(v) => updateAsset(idx, 'limitPrice', Number(v))} align="right" />
+                          )}
                           <EditCell value={String(asset.landArea)} onChange={(v) => updateAsset(idx, 'landArea', Number(v))} align="right" />
                           <EditCell value={String(asset.buildingArea)} onChange={(v) => updateAsset(idx, 'buildingArea', Number(v))} align="right" />
                           <EditCell value={asset.debtorName} onChange={(v) => updateAsset(idx, 'debtorName', v)} />

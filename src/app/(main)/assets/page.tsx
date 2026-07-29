@@ -8,6 +8,7 @@ import { Card, CardContent } from '@/components/ui/Card';
 import { formatCurrency } from '@/lib/utils';
 import { ASSET_TYPE_LABELS } from '@/domain/value-objects/AssetType';
 import { ASSET_STATUS_LABELS } from '@/domain/value-objects/AssetStatus';
+import { ASSET_LABEL_LABELS } from '@/domain/value-objects/AssetLabel';
 import { AIAnalysisPanel } from '@/components/ai/AIAnalysisPanel';
 import type { Asset } from '@/domain/entities/Asset';
 
@@ -189,6 +190,8 @@ export default function AssetsPage() {
                   <th className="text-right px-3 py-2 font-medium text-gray-500 whitespace-nowrap">Sisa Pokok</th>
                   <th className="text-right px-3 py-2 font-medium text-gray-500 whitespace-nowrap">Rasio</th>
                   <th className="text-right px-3 py-2 font-medium text-gray-500 whitespace-nowrap">Likuidasi</th>
+                  <th className="text-center px-3 py-2 font-medium text-gray-500 whitespace-nowrap">Label Asset</th>
+                  <th className="text-right px-3 py-2 font-medium text-gray-500 whitespace-nowrap">Harga Limit</th>
                   <th className="text-right px-3 py-2 font-medium text-gray-500 whitespace-nowrap">Harga Pasar Est</th>
                   <th className="text-center px-3 py-2 font-medium text-gray-500 whitespace-nowrap">Demand</th>
                   <th className="text-center px-3 py-2 font-medium text-gray-500 whitespace-nowrap">Sellable</th>
@@ -234,6 +237,16 @@ export default function AssetsPage() {
                     </td>
                     <td className="px-3 py-2 text-right text-gray-700 whitespace-nowrap">
                       {fmtRp(asset.liquidationValue)}
+                    </td>
+                    <td className="px-3 py-2 text-center whitespace-nowrap">
+                      {asset.labelAsset
+                        ? <Badge variant={asset.labelAsset === 'CASSIE' ? 'info' : 'warning'}>
+                            {ASSET_LABEL_LABELS[asset.labelAsset]}
+                          </Badge>
+                        : <span className="text-gray-400">—</span>}
+                    </td>
+                    <td className="px-3 py-2 text-right text-gray-700 whitespace-nowrap">
+                      {asset.limitPrice && asset.limitPrice > 0 ? fmtRp(asset.limitPrice) : '—'}
                     </td>
                     <td className="px-3 py-2 text-right text-gray-700 whitespace-nowrap">
                       {asset.marketPriceEst && asset.marketPriceEst > 0

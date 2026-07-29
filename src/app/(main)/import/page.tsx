@@ -9,6 +9,7 @@ import { Select } from '@/components/ui/Select';
 import { Badge } from '@/components/ui/Badge';
 import { Card, CardHeader, CardContent } from '@/components/ui/Card';
 import { CANONICAL_FIELD_LABELS, ALL_CANONICAL_FIELDS, CanonicalField } from '@/domain/entities/BankMapping';
+import { AssetLabel, ASSET_LABEL_LABELS, ALL_ASSET_LABELS } from '@/domain/value-objects/AssetLabel';
 
 // ── Types ──────────────────────────────────────────────────────────
 interface ColumnResolution {
@@ -80,6 +81,7 @@ export default function ImportPage() {
   const [step, setStep] = useState<Step>('upload');
   const [sourceType, setSourceType] = useState<'Bank' | 'Balai Lelang'>('Bank');
   const [bankName, setBankName] = useState('');
+  const [labelAsset, setLabelAsset] = useState<AssetLabel>('LELANG');
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<PreviewData | null>(null);
   const [mapping, setMapping] = useState<Record<string, string>>({});
@@ -93,6 +95,7 @@ export default function ImportPage() {
     setStep('upload');
     setSourceType('Bank');
     setBankName('');
+    setLabelAsset('LELANG');
     setFile(null);
     setPreview(null);
     setMapping({});
@@ -149,6 +152,7 @@ export default function ImportPage() {
           allRows: preview.allRows,
           mapping,
           saveMappingForBank,
+          labelAsset,
         }),
       });
       const json = await res.json();
@@ -218,6 +222,26 @@ export default function ImportPage() {
             </div>
 
             <div>
+              <label className="text-xs font-medium text-gray-600 block mb-1.5">
+                Label Asset <span className="text-gray-400 font-normal">(menentukan cara hitung Harga Limit)</span>
+              </label>
+              <Select
+                id="labelAsset"
+                value={labelAsset}
+                onChange={(e) => setLabelAsset(e.target.value as AssetLabel)}
+              >
+                {ALL_ASSET_LABELS.map((l) => (
+                  <option key={l} value={l}>{ASSET_LABEL_LABELS[l]}</option>
+                ))}
+              </Select>
+              <p className="text-xs text-gray-400 mt-1">
+                {labelAsset === 'CASSIE'
+                  ? 'Harga Limit = Nilai Pokok Hutang + 3%'
+                  : 'Harga Limit = Harga Lelang (dari kolom termapping)'}
+              </p>
+            </div>
+
+            <div>
               <label className="text-xs font-medium text-gray-600 block mb-1">File Excel / CSV</label>
               <div
                 className="border-2 border-dashed border-gray-300 rounded-xl p-8 text-center cursor-pointer hover:border-blue-400 hover:bg-blue-50/40 transition-colors"
@@ -263,7 +287,10 @@ export default function ImportPage() {
                     {preview.fileName} · {preview.totalRows} baris · {preview.headers.length} kolom
                   </p>
                 </div>
-                <Badge variant="info">{preview.bankName}</Badge>
+                <div className="flex items-center gap-2">
+                  <Badge variant="info">{preview.bankName}</Badge>
+                  <Badge variant="default">Label: {ASSET_LABEL_LABELS[labelAsset]}</Badge>
+                </div>
               </div>
             </CardHeader>
             <CardContent className="p-0">
@@ -406,6 +433,12 @@ export default function ImportPage() {
               <div className="rounded-lg bg-amber-50 border border-amber-200 px-4 py-3 text-xs text-amber-700">
                 Asset akan difilter secara otomatis berdasarkan wilayah: Surabaya Raya menerima semua tipe,
                 Jawa Timur lainnya hanya Gudang/Pabrik/Lahan, luar Jawa Timur ditolak.
+              </div>
+
+              <div className="rounded-lg bg-blue-50 border border-blue-200 px-4 py-3 text-xs text-blue-700">
+                Label Asset: <strong>{ASSET_LABEL_LABELS[labelAsset]}</strong> · {labelAsset === 'CASSIE'
+                  ? 'Harga Limit akan dihitung otomatis = Nilai Pokok Hutang + 3%.'
+                  : 'Harga Limit akan diambil dari kolom yang dipetakan ke "Harga Limit" (Harga Lelang).'}
               </div>
             </CardContent>
           </Card>

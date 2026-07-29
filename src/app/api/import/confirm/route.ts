@@ -8,6 +8,7 @@ import {
 } from '@/lib/container';
 import { CanonicalField } from '@/domain/entities/BankMapping';
 import { CreateAssetInput } from '@/domain/entities/Asset';
+import { AssetLabel } from '@/domain/value-objects/AssetLabel';
 import { autoResearchNewAreas } from '@/lib/autoResearchAreas';
 
 export const maxDuration = 60;
@@ -27,12 +28,16 @@ export async function POST(req: NextRequest) {
       allRows: Record<string, string>[];
       mapping: Record<string, string>;
       saveMappingForBank?: boolean;
+      labelAsset?: AssetLabel;
     };
 
-    const { bankName, allRows, mapping, saveMappingForBank } = body;
+    const { bankName, allRows, mapping, saveMappingForBank, labelAsset } = body;
 
     if (!bankName || !Array.isArray(allRows) || !mapping) {
       return err('VALIDATION_ERROR', 'bankName, allRows, dan mapping wajib diisi');
+    }
+    if (labelAsset !== 'CASSIE' && labelAsset !== 'LELANG') {
+      return err('VALIDATION_ERROR', 'Label Asset wajib dipilih (Cassie/Lelang)');
     }
     if (allRows.length === 0) return err('VALIDATION_ERROR', 'File tidak memiliki data');
     if (allRows.length > 2000) return err('VALIDATION_ERROR', 'Maksimal 2000 baris per import');
@@ -79,6 +84,12 @@ export async function POST(req: NextRequest) {
         continue;
       }
 
+      // Label Asset menentukan Harga Limit:
+      // Cassie -> Nilai Pokok Hutang + 3%; Lelang -> Harga Limit dari kolom termapping (Harga Lelang)
+      const limitPrice = labelAsset === 'CASSIE'
+        ? (asset.principalOutstanding ?? 0) * 1.03
+        : (asset.limitPrice ?? 0);
+
       toSave.push({
         bankName: asset.bankName?.trim() || bankName,
         assetType: asset.assetType || 'OTHER',
@@ -96,7 +107,8 @@ export async function POST(req: NextRequest) {
         principalOutstanding: asset.principalOutstanding,
         liquidationRatio: asset.liquidationRatio,
         liquidationValue: asset.liquidationValue,
-        limitPrice: asset.limitPrice ?? 0,
+        limitPrice,
+        labelAsset,
       });
     }
 

@@ -3,6 +3,7 @@ import { ok, err, requirePrivileged } from '@/lib/api';
 import { getGeographicFilterService, getAssetRepository } from '@/lib/container';
 import type { PDFExtractedAsset } from '@/types/pdf';
 import { CreateAssetInput } from '@/domain/entities/Asset';
+import { AssetLabel } from '@/domain/value-objects/AssetLabel';
 import { normalizeAssetType } from '@/domain/value-objects/AssetType';
 import { autoResearchNewAreas } from '@/lib/autoResearchAreas';
 
@@ -21,13 +22,17 @@ export async function POST(req: NextRequest) {
     const body = await req.json() as {
       bankName: string;
       assets: PDFExtractedAsset[];
+      labelAsset?: AssetLabel;
     };
 
-    const { bankName, assets } = body;
+    const { bankName, assets, labelAsset } = body;
 
     if (!bankName) return err('VALIDATION_ERROR', 'bankName wajib diisi');
     if (!Array.isArray(assets) || assets.length === 0) return err('VALIDATION_ERROR', 'Tidak ada asset untuk disimpan');
     if (assets.length > 500) return err('VALIDATION_ERROR', 'Maksimal 500 asset per konfirmasi');
+    if (labelAsset !== 'CASSIE' && labelAsset !== 'LELANG') {
+      return err('VALIDATION_ERROR', 'Label Asset wajib dipilih (Cassie/Lelang)');
+    }
 
     const geoService = getGeographicFilterService();
     const assetRepo = getAssetRepository();
@@ -58,6 +63,12 @@ export async function POST(req: NextRequest) {
         continue;
       }
 
+      // Label Asset menentukan Harga Limit:
+      // Cassie -> Nilai Pokok Hutang + 3%; Lelang -> Harga Limit hasil ekstraksi (Harga Lelang)
+      const limitPrice = labelAsset === 'CASSIE'
+        ? (a.principalOutstanding || 0) * 1.03
+        : (a.limitPrice ?? 0);
+
       toSave.push({
         bankName: a.bankName || bankName,
         assetType: normalizeAssetType(a.assetType),
@@ -75,7 +86,8 @@ export async function POST(req: NextRequest) {
         principalOutstanding: a.principalOutstanding || undefined,
         liquidationRatio: a.liquidationRatio || undefined,
         liquidationValue: a.liquidationValue || undefined,
-        limitPrice: a.limitPrice ?? 0,
+        limitPrice,
+        labelAsset,
       });
     }
 
