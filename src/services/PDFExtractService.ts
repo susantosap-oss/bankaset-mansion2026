@@ -1,5 +1,4 @@
 import { PDFParse } from 'pdf-parse';
-import { PDFDocument } from 'pdf-lib';
 import Groq from 'groq-sdk';
 import { JAWA_TIMUR_KEYWORDS } from './GeographicFilterService';
 import type { PDFExtractedAsset } from '@/types/pdf';
@@ -15,8 +14,8 @@ export interface PDFExtractResult {
 }
 
 const GROQ_MODEL = 'llama-3.3-70b-versatile';
-const CHUNK_SIZE = 200;     // pecah PDF setiap N halaman
-const MAX_SYNC_PAGES = 20;  // max halaman relevan per chunk yang dikirim ke Groq
+const CHUNK_SIZE = 200;    // jumlah halaman per virtual chunk (untuk UX / warning)
+const MAX_GROQ_PER_CHUNK = 20; // max halaman relevan yang dikirim ke Groq per chunk
 const PAGE_TEXT_LIMIT = 3500;
 
 function pageContainsJatim(text: string): boolean {
@@ -116,98 +115,6 @@ ${pageText.slice(0, PAGE_TEXT_LIMIT)}`;
     });
 }
 
-// Pecah PDF menjadi chunk buffer @CHUNK_SIZE halaman menggunakan pdf-lib.
-// Return: array chunk beserta nomor halaman awal di dokumen asli (1-based).
-async function splitPDFIntoChunks(
-  buffer: Buffer,
-): Promise<{ buffer: Buffer; startPage: number; totalPages: number }[]> {
-  const srcDoc = await PDFDocument.load(buffer, { ignoreEncryption: true });
-  const totalPages = srcDoc.getPageCount();
-
-  if (totalPages <= CHUNK_SIZE) {
-    return [{ buffer, startPage: 1, totalPages }];
-  }
-
-  const chunks: { buffer: Buffer; startPage: number; totalPages: number }[] = [];
-
-  for (let start = 0; start < totalPages; start += CHUNK_SIZE) {
-    const end = Math.min(start + CHUNK_SIZE, totalPages);
-    const chunkDoc = await PDFDocument.create();
-    const indices = Array.from({ length: end - start }, (_, i) => start + i);
-    const copied = await chunkDoc.copyPages(srcDoc, indices);
-    copied.forEach((p: import('pdf-lib').PDFPage) => chunkDoc.addPage(p));
-    const bytes = await chunkDoc.save();
-    chunks.push({ buffer: Buffer.from(bytes), startPage: start + 1, totalPages });
-  }
-
-  return chunks;
-}
-
-// Ekstrak teks & jalankan Groq untuk satu chunk buffer.
-// pageOffset: nomor halaman pertama chunk di dokumen asli (untuk pageNumber yang benar di asset).
-async function processChunk(
-  buffer: Buffer,
-  bankName: string,
-  pageOffset: number,
-  groq: Groq,
-): Promise<{ assets: PDFExtractedAsset[]; relevantPages: number; warnings: string[] }> {
-  const warnings: string[] = [];
-
-  // Ekstrak teks dari chunk
-  let pdfPages: { text: string; num: number }[] = [];
-  const parser = new PDFParse({ data: buffer });
-  try {
-    const result = await parser.getText();
-    pdfPages = result.pages;
-  } catch (e) {
-    await parser.destroy().catch(() => {});
-    warnings.push(`Gagal membaca PDF: ${e instanceof Error ? e.message : String(e)}`);
-    return { assets: [], relevantPages: 0, warnings };
-  }
-  await parser.destroy().catch(() => {});
-
-  const pages = pdfPages.length > 0 ? pdfPages.map((p) => p.text) : [];
-
-  if (pages.length === 0 || pages.every((p) => !p.trim())) {
-    warnings.push('Tidak ada konten teks (mungkin PDF berbasis gambar/scan — gunakan OCR terlebih dahulu).');
-    return { assets: [], relevantPages: 0, warnings };
-  }
-
-  // Filter halaman yang mengandung kata kunci Jawa Timur
-  const relevantPages = pages
-    .map((text, i) => ({ text, pageNum: pageOffset + i }))
-    .filter(({ text }) => pageContainsJatim(text));
-
-  if (relevantPages.length === 0) {
-    warnings.push('Tidak ditemukan konten terkait Jawa Timur di bagian ini.');
-    return { assets: [], relevantPages: 0, warnings };
-  }
-
-  let toProcess = relevantPages;
-  if (toProcess.length > MAX_SYNC_PAGES) {
-    warnings.push(
-      `${relevantPages.length} halaman relevan ditemukan, hanya ${MAX_SYNC_PAGES} halaman pertama diproses.`,
-    );
-    toProcess = toProcess.slice(0, MAX_SYNC_PAGES);
-  }
-
-  // Groq: jalankan paralel per halaman (lebih cepat dari sequential)
-  const results = await Promise.allSettled(
-    toProcess.map(({ text, pageNum }) => extractPageWithGroq(text, bankName, pageNum, groq)),
-  );
-
-  const assets: PDFExtractedAsset[] = [];
-  results.forEach((r, idx) => {
-    if (r.status === 'fulfilled') {
-      assets.push(...r.value);
-    } else {
-      warnings.push(`Halaman ${toProcess[idx].pageNum}: gagal diproses (${r.reason instanceof Error ? r.reason.message : 'error tidak diketahui'})`);
-    }
-  });
-
-  return { assets, relevantPages: relevantPages.length, warnings };
-}
-
 export class PDFExtractService {
   private groq: Groq;
 
@@ -218,35 +125,88 @@ export class PDFExtractService {
   async extractFromBuffer(buffer: Buffer, bankName: string): Promise<PDFExtractResult> {
     const warnings: string[] = [];
 
-    // Pecah PDF menjadi chunk @CHUNK_SIZE halaman
-    let chunks: { buffer: Buffer; startPage: number; totalPages: number }[];
+    // Ekstrak teks semua halaman sekaligus — lebih ringan di memori daripada pdf-lib split
+    let allPages: { text: string; pageNum: number }[] = [];
+    let totalPages = 0;
+
+    const parser = new PDFParse({ data: buffer });
     try {
-      chunks = await splitPDFIntoChunks(buffer);
+      const result = await parser.getText();
+      totalPages = result.total;
+      allPages = result.pages.map((p, i) => ({ text: p.text, pageNum: i + 1 }));
     } catch (e) {
+      await parser.destroy().catch(() => {});
       throw new Error(`Gagal membaca PDF: ${e instanceof Error ? e.message : String(e)}`);
     }
+    await parser.destroy().catch(() => {});
 
-    const totalPages = chunks[0].totalPages; // sama untuk semua chunk
+    if (allPages.length === 0 || allPages.every((p) => !p.text.trim())) {
+      return {
+        totalPages,
+        relevantPages: 0,
+        assets: [],
+        warnings: ['PDF tidak memiliki konten teks. Mungkin PDF berbasis gambar (scan) — gunakan OCR terlebih dahulu.'],
+        method: 'GROQ',
+      };
+    }
 
-    if (chunks.length > 1) {
+    // Pecah halaman menjadi virtual chunk @CHUNK_SIZE untuk diproses bertahap
+    const chunks: { pages: { text: string; pageNum: number }[]; label: string }[] = [];
+    const totalChunks = Math.ceil(allPages.length / CHUNK_SIZE);
+
+    for (let i = 0; i < allPages.length; i += CHUNK_SIZE) {
+      const slice = allPages.slice(i, i + CHUNK_SIZE);
+      const from = slice[0].pageNum;
+      const to = slice[slice.length - 1].pageNum;
+      chunks.push({
+        pages: slice,
+        label: totalChunks > 1 ? `[Hal. ${from}–${to}] ` : '',
+      });
+    }
+
+    if (totalChunks > 1) {
       warnings.push(
-        `PDF ${totalPages} halaman dipecah otomatis menjadi ${chunks.length} bagian (maks. ${CHUNK_SIZE} halaman per bagian).`,
+        `PDF ${totalPages} halaman dibagi otomatis menjadi ${totalChunks} bagian (@${CHUNK_SIZE} halaman) untuk diproses.`,
       );
     }
 
-    // Proses setiap chunk secara berurutan
+    // Proses setiap chunk: geo filter → Groq paralel
     const allAssets: PDFExtractedAsset[] = [];
     let totalRelevantPages = 0;
 
-    for (let i = 0; i < chunks.length; i++) {
-      const { buffer: chunkBuf, startPage } = chunks[i];
-      const prefix = chunks.length > 1 ? `[Bagian ${i + 1}/${chunks.length}, hal. ${startPage}] ` : '';
+    for (const chunk of chunks) {
+      const relevantInChunk = chunk.pages.filter(({ text }) => pageContainsJatim(text));
+      totalRelevantPages += relevantInChunk.length;
 
-      const result = await processChunk(chunkBuf, bankName, startPage, this.groq);
+      if (relevantInChunk.length === 0) {
+        warnings.push(`${chunk.label}Tidak ditemukan konten terkait Jawa Timur.`);
+        continue;
+      }
 
-      allAssets.push(...result.assets);
-      totalRelevantPages += result.relevantPages;
-      result.warnings.forEach((w) => warnings.push(prefix + w));
+      let toProcess = relevantInChunk;
+      if (toProcess.length > MAX_GROQ_PER_CHUNK) {
+        warnings.push(
+          `${chunk.label}${relevantInChunk.length} halaman relevan, hanya ${MAX_GROQ_PER_CHUNK} diproses.`,
+        );
+        toProcess = toProcess.slice(0, MAX_GROQ_PER_CHUNK);
+      }
+
+      // Groq paralel untuk semua halaman dalam chunk sekaligus
+      const results = await Promise.allSettled(
+        toProcess.map(({ text, pageNum }) =>
+          extractPageWithGroq(text, bankName, pageNum, this.groq),
+        ),
+      );
+
+      results.forEach((r, idx) => {
+        if (r.status === 'fulfilled') {
+          allAssets.push(...r.value);
+        } else {
+          warnings.push(
+            `${chunk.label}Halaman ${toProcess[idx].pageNum}: gagal diproses (${r.reason instanceof Error ? r.reason.message : 'error tidak diketahui'})`,
+          );
+        }
+      });
     }
 
     return {
