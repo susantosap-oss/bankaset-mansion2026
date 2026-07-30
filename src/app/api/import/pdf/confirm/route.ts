@@ -15,8 +15,14 @@ const REJECTED_LABELS: Record<string, string> = {
 };
 
 export async function POST(req: NextRequest) {
-  const { error } = await requirePrivileged();
-  if (error) return error;
+  // Allow local CLI tool via Bearer AUTH_SECRET (bypass session)
+  const authHeader = req.headers.get('authorization');
+  const isCLI = !!process.env.AUTH_SECRET && authHeader === `Bearer ${process.env.AUTH_SECRET}`;
+
+  if (!isCLI) {
+    const { error } = await requirePrivileged();
+    if (error) return error;
+  }
 
   try {
     const body = await req.json() as {
