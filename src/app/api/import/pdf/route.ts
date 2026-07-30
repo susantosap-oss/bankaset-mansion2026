@@ -2,7 +2,7 @@ import { NextRequest } from 'next/server';
 import { ok, err, requirePrivileged } from '@/lib/api';
 import { PDFExtractService } from '@/services/PDFExtractService';
 
-export const maxDuration = 120; // seconds — Groq calls per page take time
+export const maxDuration = 300; // seconds — multi-chunk PDF processing (5 chunks × ~60s)
 
 export async function POST(req: NextRequest) {
   const { error } = await requirePrivileged();

@@ -36,7 +36,7 @@ const nextConfig: NextConfig = {
   },
 
   // Silence warnings for server-only packages used in route handlers
-  serverExternalPackages: ['pdf-parse'],
+  serverExternalPackages: ['pdf-parse', 'pdf-lib'],
 
   turbopack: {
     root: __dirname,

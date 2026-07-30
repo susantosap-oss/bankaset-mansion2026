@@ -113,10 +113,16 @@ export default function PDFImportPage() {
       fd.append('file', file);
       fd.append('bankName', bankName.trim());
       const res = await fetch('/api/import/pdf', { method: 'POST', body: fd });
-      const json = await res.json();
-      if (!res.ok || json.error) throw new Error(json.error?.message ?? json.message ?? `Error ${res.status}`);
+      const text = await res.text();
+      let json: Record<string, unknown>;
+      try {
+        json = JSON.parse(text);
+      } catch {
+        throw new Error('Server timeout atau error internal. PDF mungkin terlalu besar — coba pecah menjadi bagian lebih kecil (maks. 300 halaman).');
+      }
+      if (!res.ok || json.error) throw new Error((json.error as Record<string, unknown>)?.message as string ?? json.message as string ?? `Error ${res.status}`);
 
-      const data: PDFPreviewData = json.data;
+      const data = json.data as PDFPreviewData;
       setPreview(data);
       setAssets(labelAsset === 'CASSIE'
         ? data.assets.map((a) => ({ ...a, limitPrice: (a.outstanding || 0) }))
