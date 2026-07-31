@@ -68,7 +68,7 @@ ${pageText.slice(0, PAGE_TEXT_LIMIT)}`;
     model: GROQ_MODEL,
     messages: [{ role: 'user', content: prompt }],
     temperature: 0.1,
-    max_tokens: 2048,
+    max_tokens: 512, // 1 properti per halaman cukup; hemat ~75% token vs 2048
   });
 
   const raw = completion.choices[0]?.message?.content ?? '{}';
@@ -119,7 +119,11 @@ export class PDFExtractService {
   private groq: Groq;
 
   constructor() {
-    this.groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
+    this.groq = new Groq({
+      apiKey: process.env.GROQ_API_KEY,
+      maxRetries: 0,   // fail fast — retry storms cause Cloud Run timeout
+      timeout: 25_000, // 25s per request (default is 60s)
+    });
   }
 
   async extractFromBuffer(buffer: Buffer, bankName: string): Promise<PDFExtractResult> {
@@ -198,13 +202,23 @@ export class PDFExtractService {
         ),
       );
 
+      let tpdHit = false;
       results.forEach((r, idx) => {
         if (r.status === 'fulfilled') {
           allAssets.push(...r.value);
         } else {
-          warnings.push(
-            `${chunk.label}Halaman ${toProcess[idx].pageNum}: gagal diproses (${r.reason instanceof Error ? r.reason.message : 'error tidak diketahui'})`,
-          );
+          const msg = r.reason instanceof Error ? r.reason.message : 'error tidak diketahui';
+          // Deteksi Groq daily token quota habis (TPD)
+          if (!tpdHit && msg.includes('tokens per day')) {
+            tpdHit = true;
+            const waitMatch = msg.match(/try again in (.+?)\./i);
+            const waitInfo = waitMatch ? ` Coba lagi dalam ${waitMatch[1]}.` : '';
+            warnings.push(`Groq daily token limit habis (100k/hari).${waitInfo} Halaman sisanya dilewati.`);
+          } else if (!tpdHit) {
+            warnings.push(
+              `${chunk.label}Halaman ${toProcess[idx].pageNum}: gagal diproses (${msg.slice(0, 120)})`,
+            );
+          }
         }
       });
     }

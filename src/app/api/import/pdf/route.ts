@@ -26,7 +26,16 @@ export async function POST(req: NextRequest) {
     const buffer = Buffer.from(bytes);
 
     const service = new PDFExtractService();
-    const result = await service.extractFromBuffer(buffer, bankName.trim());
+    const TIMEOUT_MS = 200_000; // 200s — well under Cloud Run 600s, always returns JSON
+    const result = await Promise.race([
+      service.extractFromBuffer(buffer, bankName.trim()),
+      new Promise<never>((_, reject) =>
+        setTimeout(
+          () => reject(new Error('Proses PDF melebihi 200 detik — coba gunakan CLI import-pdf.bat untuk PDF besar')),
+          TIMEOUT_MS,
+        ),
+      ),
+    ]);
 
     return ok({
       fileName: file.name,

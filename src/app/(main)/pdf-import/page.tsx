@@ -118,7 +118,7 @@ export default function PDFImportPage() {
       try {
         json = JSON.parse(text);
       } catch {
-        throw new Error('Server timeout atau error internal. PDF mungkin terlalu besar — coba pecah menjadi bagian lebih kecil (maks. 300 halaman).');
+        throw new Error(`Server error (HTTP ${res.status}) — response tidak valid. Coba lagi atau gunakan import-pdf.bat untuk PDF besar.`);
       }
       if (!res.ok || json.error) throw new Error((json.error as Record<string, unknown>)?.message as string ?? json.message as string ?? `Error ${res.status}`);
 

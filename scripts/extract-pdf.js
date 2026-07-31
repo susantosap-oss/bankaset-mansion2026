@@ -53,8 +53,8 @@ if (!CLI_AUTH)  { console.error('Error: AUTH_SECRET tidak ada di .env.local'); p
 // ── Config ───────────────────────────────────────────────────────────────────
 const GROQ_MODEL        = 'llama-3.3-70b-versatile';
 const CHUNK_SIZE        = 200;   // virtual chunk per iterasi
-const MAX_GROQ_PER_CHUNK = 20;  // max halaman relevan per chunk dikirim ke Groq
-const PAGE_TEXT_LIMIT   = 3500;
+const MAX_GROQ_PER_CHUNK = 50;  // max halaman relevan per chunk dikirim ke Groq
+const PAGE_TEXT_LIMIT   = 2000;
 const SAVE_BATCH_SIZE   = 400;  // max asset per 1 POST confirm
 
 const JATIM_KW = [
@@ -86,7 +86,7 @@ function log(msg) { process.stdout.write(msg + '\n'); }
 function progress(msg) { process.stdout.write('\r\x1b[K' + msg); }
 
 // ── Groq extraction untuk 1 halaman ─────────────────────────────────────────
-async function extractPage(pageText, pageNumber) {
+async function extractPage(pageText, pageNumber, retries = 3) {
   const prompt = `Kamu adalah extractor data properti lelang bank Indonesia.
 Ekstrak semua data aset dari teks dokumen bank berikut.
 Kembalikan JSON object dengan key "assets" berisi array objek aset.
@@ -113,13 +113,16 @@ ${pageText.slice(0, PAGE_TEXT_LIMIT)}`;
   const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${GROQ_KEY}` },
-    body: JSON.stringify({ model: GROQ_MODEL, messages: [{ role: 'user', content: prompt }], temperature: 0.1, max_tokens: 2048 }),
+    body: JSON.stringify({ model: GROQ_MODEL, messages: [{ role: 'user', content: prompt }], temperature: 0.1, max_tokens: 1024 }),
   });
 
   if (res.status === 429) {
-    // Rate limited — tunggu 10 detik dan coba ulang
-    await new Promise(r => setTimeout(r, 10000));
-    return extractPage(pageText, pageNumber);
+    if (retries <= 0) { log(`  [skip] hal.${pageNumber} — Groq rate limit, lewati.`); return []; }
+    const retryAfter = parseInt(res.headers.get('retry-after') ?? '30', 10);
+    const waitSec = Math.min(retryAfter + 2, 90);
+    log(`  [429] hal.${pageNumber} — tunggu ${waitSec}s... (retry ${4 - retries}/3)`);
+    await new Promise(r => setTimeout(r, waitSec * 1000));
+    return extractPage(pageText, pageNumber, retries - 1);
   }
   if (!res.ok) throw new Error(`Groq ${res.status}`);
 
@@ -228,18 +231,20 @@ async function main() {
     const toProcess = relevant.slice(0, MAX_GROQ_PER_CHUNK);
     log(`${label} ${relevant.length} hal. relevan → kirim ${toProcess.length} ke Groq...`);
 
-    const results = await Promise.allSettled(
-      toProcess.map(({ text, pageNum }, idx) => {
-        progress(`  Groq: ${idx + 1}/${toProcess.length} halaman...`);
-        return extractPage(text, pageNum);
-      })
-    );
-    progress(''); // clear progress line
-
     let chunkAssets = 0;
-    for (const r of results) {
-      if (r.status === 'fulfilled') { allAssets.push(...r.value); chunkAssets += r.value.length; }
+    for (let pi = 0; pi < toProcess.length; pi++) {
+      const { text, pageNum } = toProcess[pi];
+      progress(`  Groq: ${pi + 1}/${toProcess.length} halaman (hal.${pageNum})...`);
+      try {
+        const assets = await extractPage(text, pageNum);
+        allAssets.push(...assets);
+        chunkAssets += assets.length;
+      } catch (e) {
+        log(`  [skip] hal.${pageNum} error: ${e.message}`);
+      }
+      if (pi < toProcess.length - 1) await new Promise(r => setTimeout(r, 10000));
     }
+    progress('');
     log(`  → ${chunkAssets} asset ditemukan (total sejauh ini: ${allAssets.length})`);
 
     // Jeda kecil antar chunk agar tidak kena Groq rate limit
