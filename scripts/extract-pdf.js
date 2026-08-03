@@ -107,7 +107,7 @@ if (!CLI_AUTH)   { console.error('Error: AUTH_SECRET tidak ada di .env.local'); 
 
 // ── Config ───────────────────────────────────────────────────────────────────
 // Gemini free tier: 15 RPM, 1,000,000 TPM — jauh lebih longgar dari Groq
-const AI_MODEL           = 'gemini-1.5-flash';
+const AI_MODEL           = 'gemini-2.0-flash';
 const AI_API_URL         = 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions';
 const CHUNK_SIZE         = 200;  // virtual chunk per iterasi
 const MAX_GROQ_PER_CHUNK = 20;  // max halaman per chunk
@@ -284,14 +284,14 @@ async function main() {
     }
 
     const toProcess = relevant.slice(0, MAX_GROQ_PER_CHUNK);
-    log(`${label} ${relevant.length} hal. relevan → kirim ${toProcess.length} ke Groq...`);
+    log(`${label} ${relevant.length} hal. relevan → kirim ${toProcess.length} ke Gemini...`);
 
     let chunkAssets = 0;
     let pageDelay = DELAY_NORMAL;
     let cleanStreak = 0;
     for (let pi = 0; pi < toProcess.length; pi++) {
       const { text, pageNum } = toProcess[pi];
-      progress(`  Groq: ${pi + 1}/${toProcess.length} halaman (hal.${pageNum})...`);
+      progress(`  Gemini: ${pi + 1}/${toProcess.length} halaman (hal.${pageNum})...`);
       try {
         const { assets, rateLimited } = await extractPage(text, pageNum);
         allAssets.push(...assets);
