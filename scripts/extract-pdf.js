@@ -108,7 +108,7 @@ if (!CLI_AUTH)   { console.error('Error: AUTH_SECRET tidak ada di .env.local'); 
 
 // ── Config ───────────────────────────────────────────────────────────────────
 // gemini-2.5-flash-lite: free tier 1000 RPD, tidak kena limit:0
-const AI_MODEL           = 'gemini-2.5-flash-lite';
+const AI_MODEL           = 'gemini-2.5-flash';
 const AI_API_URL         = `https://generativelanguage.googleapis.com/v1/models/${AI_MODEL}:generateContent`;
 const CHUNK_SIZE         = 200;
 const MAX_GROQ_PER_CHUNK = 20;
