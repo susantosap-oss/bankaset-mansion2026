@@ -188,7 +188,7 @@ ${pageText.slice(0, PAGE_TEXT_LIMIT)}`;
   const raw  = data.choices?.[0]?.message?.content ?? '{}';
 
   let parsed = {};
-  try { const m = raw.match(/\{[\s\S]*\}/); parsed = m ? JSON.parse(m[0]) : {}; } catch { return []; }
+  try { const m = raw.match(/\{[\s\S]*\}/); parsed = m ? JSON.parse(m[0]) : {}; } catch { return { assets: [], rateLimited: _hadRateLimit }; }
 
   const key = Object.keys(parsed).find(k => Array.isArray(parsed[k])) ?? '';
   const arr = key ? parsed[key] : [];
