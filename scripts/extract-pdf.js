@@ -98,21 +98,23 @@ async function pickPdfFromFolder() {
   });
 }
 
-const SERVER   = (serverArg || 'https://bankaset-mansion2026-diodfcxltq-et.a.run.app').replace(/\/$/, '');
-const GROQ_KEY = process.env.GROQ_API_KEY;
-const CLI_AUTH = process.env.AUTH_SECRET;
+const SERVER      = (serverArg || 'https://bankaset-mansion2026-diodfcxltq-et.a.run.app').replace(/\/$/, '');
+const GEMINI_KEY  = process.env.GEMINI_API_KEY;
+const CLI_AUTH    = process.env.AUTH_SECRET;
 
-if (!GROQ_KEY)  { console.error('Error: GROQ_API_KEY tidak ada di .env.local'); process.exit(1); }
-if (!CLI_AUTH)  { console.error('Error: AUTH_SECRET tidak ada di .env.local'); process.exit(1); }
+if (!GEMINI_KEY) { console.error('Error: GEMINI_API_KEY tidak ada di .env.local'); process.exit(1); }
+if (!CLI_AUTH)   { console.error('Error: AUTH_SECRET tidak ada di .env.local'); process.exit(1); }
 
 // ── Config ───────────────────────────────────────────────────────────────────
-const GROQ_MODEL         = 'llama-3.3-70b-versatile';
+// Gemini free tier: 15 RPM, 1,000,000 TPM — jauh lebih longgar dari Groq
+const AI_MODEL           = 'gemini-1.5-flash';
+const AI_API_URL         = 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions';
 const CHUNK_SIZE         = 200;  // virtual chunk per iterasi
 const MAX_GROQ_PER_CHUNK = 20;  // max halaman per chunk
-const PAGE_TEXT_LIMIT    = 1000; // diperkecil 50% untuk hemat token
+const PAGE_TEXT_LIMIT    = 2000; // dikembalikan ke 2000 — TPM Gemini sangat longgar
 const SAVE_BATCH_SIZE    = 400;  // max asset per 1 POST confirm
-const DELAY_NORMAL       = 22000; // jeda antar halaman (ms)
-const DELAY_AFTER_429    = 65000; // jeda setelah kena rate limit (ms)
+const DELAY_NORMAL       = 5000;  // 15 RPM → minimal 4s, pakai 5s untuk aman
+const DELAY_AFTER_429    = 30000; // jeda setelah kena rate limit (ms)
 
 const JATIM_KW = [
   'surabaya','sidoarjo','gresik','mojokerto','malang','kediri','jember',
@@ -152,21 +154,21 @@ assetType(RUMAH/LAHAN/RUKO/GUDANG/PABRIK/APARTEMEN/KANTOR/OTHER), city(kota keci
 Teks:
 ${pageText.slice(0, PAGE_TEXT_LIMIT)}`;
 
-  const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+  const res = await fetch(AI_API_URL, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${GROQ_KEY}` },
-    body: JSON.stringify({ model: GROQ_MODEL, messages: [{ role: 'user', content: prompt }], temperature: 0.1, max_tokens: 512 }),
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${GEMINI_KEY}` },
+    body: JSON.stringify({ model: AI_MODEL, messages: [{ role: 'user', content: prompt }], temperature: 0.1, max_tokens: 1024 }),
   });
 
   if (res.status === 429) {
-    if (retries <= 0) { log(`  [skip] hal.${pageNumber} — Groq rate limit, lewati.`); return { assets: [], rateLimited: true }; }
-    const retryAfter = parseInt(res.headers.get('retry-after') ?? '30', 10);
-    const waitSec = Math.min(retryAfter + 5, 100);
+    if (retries <= 0) { log(`  [skip] hal.${pageNumber} — rate limit, lewati.`); return { assets: [], rateLimited: true }; }
+    const retryAfter = parseInt(res.headers.get('retry-after') ?? '15', 10);
+    const waitSec = Math.min(retryAfter + 5, 60);
     log(`  [429] hal.${pageNumber} — tunggu ${waitSec}s... (retry ${4 - retries}/3)`);
     await new Promise(r => setTimeout(r, waitSec * 1000));
     return extractPage(pageText, pageNumber, retries - 1, true);
   }
-  if (!res.ok) throw new Error(`Groq ${res.status}`);
+  if (!res.ok) throw new Error(`Gemini ${res.status}: ${await res.text().catch(() => '')}`);
 
   const data = await res.json();
   const raw  = data.choices?.[0]?.message?.content ?? '{}';
