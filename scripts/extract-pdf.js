@@ -107,33 +107,14 @@ if (!GEMINI_KEY) { console.error('Error: GEMINI_API_KEY tidak ada di .env.local'
 if (!CLI_AUTH)   { console.error('Error: AUTH_SECRET tidak ada di .env.local'); process.exit(1); }
 
 // ── Config ───────────────────────────────────────────────────────────────────
-const AI_MODEL           = 'gemini-flash-latest';
-const CHUNK_SIZE         = 200;
-const MAX_GROQ_PER_CHUNK = 20;
-const PAGE_TEXT_LIMIT    = 2000;
-const SAVE_BATCH_SIZE    = 400;
-const DELAY_NORMAL       = 5000;
-const DELAY_AFTER_429    = 30000;
+const AI_MODEL        = 'gemini-flash-latest';
+const SAVE_BATCH_SIZE = 400;
 
 // ── Init Gemini SDK ──────────────────────────────────────────────────────────
 const { GoogleGenAI } = require('@google/genai');
 const genai = new GoogleGenAI({ apiKey: GEMINI_KEY });
 
-const JATIM_KW = [
-  'surabaya','sidoarjo','gresik','mojokerto','malang','kediri','jember',
-  'banyuwangi','madiun','pasuruan','probolinggo','blitar','tulungagung',
-  'jombang','bojonegoro','lamongan','tuban','nganjuk','ngawi','magetan',
-  'pamekasan','sumenep','sampang','bangkalan','lumajang','situbondo',
-  'bondowoso','trenggalek','ponorogo','pacitan','batu',
-  'jawa timur','jatim','sby','sda','gsk',
-];
-
 // ── Helpers ──────────────────────────────────────────────────────────────────
-function hasJatim(text) {
-  const lo = text.toLowerCase();
-  return JATIM_KW.some(kw => lo.includes(kw));
-}
-
 function confidence(item) {
   let s = 0;
   if (item.city   && String(item.city).length > 2)    s++;
@@ -147,72 +128,68 @@ function confidence(item) {
 function log(msg) { process.stdout.write(msg + '\n'); }
 function progress(msg) { process.stdout.write('\r\x1b[K' + msg); }
 
-// ── Groq extraction untuk 1 halaman ─────────────────────────────────────────
-// Returns { assets, rateLimited } — rateLimited=true jika sempat kena 429
-async function extractPage(pageText, pageNumber, retries = 3, _hadRateLimit = false) {
-  const prompt = `Ekstrak aset properti dari teks lelang bank Indonesia. Kembalikan JSON {"assets":[...]}. Jika tidak ada, {"assets":[]}.
-Field setiap aset (0 atau "" jika tidak ada):
-assetType(RUMAH/LAHAN/RUKO/GUDANG/PABRIK/APARTEMEN/KANTOR/OTHER), city(kota kecil), district, area, address, marketValue(int rupiah), outstanding(int), landArea(m2), buildingArea(m2), debtorName, principalOutstanding(int), liquidationValue(int), limitPrice(int)
+function mapAsset(item) {
+  return {
+    bankName,
+    assetType:            String(item.assetType ?? 'OTHER'),
+    city:                 String(item.city ?? '').toLowerCase().trim(),
+    district:             String(item.district ?? ''),
+    area:                 String(item.area ?? ''),
+    address:              String(item.address ?? ''),
+    marketValue:          Number(item.marketValue ?? 0),
+    outstanding:          Number(item.outstanding ?? 0),
+    landArea:             Number(item.landArea ?? 0),
+    buildingArea:         Number(item.buildingArea ?? 0),
+    debtorName:           String(item.debtorName ?? ''),
+    principalOutstanding: Number(item.principalOutstanding ?? 0),
+    liquidationRatio: (() => {
+      if (labelAsset === 'LELANG') {
+        const mv = Number(item.marketValue ?? 0);
+        const lp = Number(item.limitPrice ?? 0);
+        return mv > 0 && lp > 0 ? Math.round((lp / mv) * 100) / 100 : 0;
+      }
+      return 0;
+    })(),
+    liquidationValue:     Number(item.liquidationValue ?? 0),
+    limitPrice:           Number(item.limitPrice ?? 0),
+    pageNumber:           0,
+    confidence:           confidence(item),
+    rawText:              '',
+  };
+}
 
-Teks:
-${pageText.slice(0, PAGE_TEXT_LIMIT)}`;
+// ── Upload PDF + ekstrak semua aset dalam 1 request ──────────────────────────
+async function extractAllFromPdf(pdfPath) {
+  log('[2/4] Upload PDF ke Gemini Files API...');
+  const uploadedFile = await genai.files.upload({
+    file: pdfPath,
+    config: { mimeType: 'application/pdf', displayName: path.basename(pdfPath) },
+  });
+  log(`  ✓ Upload selesai\n`);
 
-  let raw = '{}';
+  log('[3/4] Ekstrak semua aset (1 request ke Gemini)...');
+  const prompt = `Ekstrak SEMUA aset properti lelang bank dari dokumen PDF ini yang berlokasi di Jawa Timur (Surabaya, Sidoarjo, Gresik, Mojokerto, Malang, Kediri, Jember, dan kota/kabupaten lain di Jawa Timur).
+Kembalikan HANYA JSON valid: {"assets":[...]}. Jika tidak ada, {"assets":[]}.
+Field setiap aset (integer rupiah untuk nilai uang, angka untuk luas, "" jika tidak ada):
+assetType(RUMAH/LAHAN/RUKO/GUDANG/PABRIK/APARTEMEN/KANTOR/OTHER), city(nama kota huruf kecil), district(kecamatan), area(kelurahan), address(alamat lengkap), marketValue, outstanding, landArea, buildingArea, debtorName, principalOutstanding, liquidationValue, limitPrice`;
+
+  const response = await genai.models.generateContent({
+    model: AI_MODEL,
+    contents: [
+      { fileData: { fileUri: uploadedFile.uri, mimeType: 'application/pdf' } },
+      { text: prompt },
+    ],
+    config: { responseMimeType: 'application/json', maxOutputTokens: 8192, temperature: 0.1 },
+  });
+
+  let arr = [];
   try {
-    const response = await genai.models.generateContent({
-      model: AI_MODEL,
-      contents: prompt,
-      config: { temperature: 0.1, maxOutputTokens: 1024 },
-    });
-    raw = response.text ?? '{}';
-  } catch (e) {
-    const status = e.status ?? e.code ?? 0;
-    if (status === 429) {
-      if (retries <= 0) { log(`  [skip] hal.${pageNumber} — rate limit, lewati.`); return { assets: [], rateLimited: true }; }
-      const waitSec = Math.min((e.retryAfter ?? 15) + 5, 60);
-      log(`  [429] hal.${pageNumber} — tunggu ${waitSec}s... (retry ${4 - retries}/3)`);
-      await new Promise(r => setTimeout(r, waitSec * 1000));
-      return extractPage(pageText, pageNumber, retries - 1, true);
-    }
-    throw new Error(`Gemini ${status}: ${e.message}`);
-  }
+    const parsed = JSON.parse(response.text ?? '{}');
+    const key = Object.keys(parsed).find(k => Array.isArray(parsed[k])) ?? '';
+    arr = key ? parsed[key] : [];
+  } catch { arr = []; }
 
-  let parsed = {};
-  try { const m = raw.match(/\{[\s\S]*\}/); parsed = m ? JSON.parse(m[0]) : {}; } catch { return { assets: [], rateLimited: _hadRateLimit }; }
-
-  const key = Object.keys(parsed).find(k => Array.isArray(parsed[k])) ?? '';
-  const arr = key ? parsed[key] : [];
-
-  const assets = arr
-    .filter(item => item && typeof item === 'object')
-    .map(item => ({
-      bankName,
-      assetType:           String(item.assetType ?? 'OTHER'),
-      city:                String(item.city ?? '').toLowerCase().trim(),
-      district:            String(item.district ?? ''),
-      area:                String(item.area ?? ''),
-      address:             String(item.address ?? ''),
-      marketValue:         Number(item.marketValue ?? 0),
-      outstanding:         Number(item.outstanding ?? 0),
-      landArea:            Number(item.landArea ?? 0),
-      buildingArea:        Number(item.buildingArea ?? 0),
-      debtorName:          String(item.debtorName ?? ''),
-      principalOutstanding:Number(item.principalOutstanding ?? 0),
-      liquidationRatio:    (() => {
-        if (labelAsset === 'LELANG') {
-          const mv = Number(item.marketValue ?? 0);
-          const lp = Number(item.limitPrice ?? 0);
-          return mv > 0 && lp > 0 ? Math.round((lp / mv) * 100) / 100 : 0;
-        }
-        return 0;
-      })(),
-      liquidationValue:    Number(item.liquidationValue ?? 0),
-      limitPrice:          Number(item.limitPrice ?? 0),
-      pageNumber,
-      confidence:          confidence(item),
-      rawText:             pageText.slice(0, 300),
-    }));
-  return { assets, rateLimited: _hadRateLimit };
+  return arr.filter(item => item && typeof item === 'object').map(mapAsset);
 }
 
 // ── POST ke confirm endpoint ─────────────────────────────────────────────────
@@ -263,79 +240,15 @@ async function main() {
     return;
   }
 
-  // 1. Baca file
+  // 1. Cek file
   if (!fs.existsSync(pdfPath)) { console.error(`Error: File tidak ditemukan: ${pdfPath}`); process.exit(1); }
-  const buffer  = fs.readFileSync(pdfPath);
-  const sizeMB  = (buffer.length / 1024 / 1024).toFixed(1);
-  log(`[1/4] Membaca file ${sizeMB} MB...`);
+  const sizeMB = (fs.statSync(pdfPath).size / 1024 / 1024).toFixed(1);
+  log(`[1/4] File siap: ${sizeMB} MB`);
 
-  // 2. Ekstrak teks semua halaman
-  const { PDFParse } = require(path.join(__dirname, '..', 'node_modules', 'pdf-parse', 'dist', 'pdf-parse', 'cjs', 'index.cjs'));
-  const parser = new PDFParse({ data: buffer });
-  let pdfResult;
-  try {
-    pdfResult = await parser.getText();
-  } finally {
-    await parser.destroy().catch(() => {});
-  }
+  // 2+3. Upload PDF ke Gemini & ekstrak semua aset dalam 1 request
+  const allAssets = await extractAllFromPdf(pdfPath);
 
-  const totalPages = pdfResult.total;
-  const allPages   = pdfResult.pages.map((p, i) => ({ text: p.text, pageNum: i + 1 }));
-  const totalChunks = Math.ceil(allPages.length / CHUNK_SIZE);
-
-  log(`[2/4] Teks diekstrak — ${totalPages} halaman, dibagi ${totalChunks} bagian (@${CHUNK_SIZE} halaman)\n`);
-
-  // 3. Proses chunk demi chunk → Groq
-  const allAssets = [];
-  let totalRelevant = 0;
-
-  for (let ci = 0; ci < totalChunks; ci++) {
-    const slice   = allPages.slice(ci * CHUNK_SIZE, (ci + 1) * CHUNK_SIZE);
-    const from    = slice[0].pageNum;
-    const to      = slice[slice.length - 1].pageNum;
-    const label   = `[Bagian ${ci + 1}/${totalChunks} | Hal. ${from}–${to}]`;
-
-    const relevant = slice.filter(p => hasJatim(p.text));
-    totalRelevant += relevant.length;
-
-    if (relevant.length === 0) {
-      log(`${label} Tidak ada halaman relevan Jawa Timur, skip.`);
-      continue;
-    }
-
-    const toProcess = relevant.slice(0, MAX_GROQ_PER_CHUNK);
-    log(`${label} ${relevant.length} hal. relevan → kirim ${toProcess.length} ke Gemini...`);
-
-    let chunkAssets = 0;
-    let pageDelay = DELAY_NORMAL;
-    let cleanStreak = 0;
-    for (let pi = 0; pi < toProcess.length; pi++) {
-      const { text, pageNum } = toProcess[pi];
-      progress(`  Gemini: ${pi + 1}/${toProcess.length} halaman (hal.${pageNum})...`);
-      try {
-        const { assets, rateLimited } = await extractPage(text, pageNum);
-        allAssets.push(...assets);
-        chunkAssets += assets.length;
-        if (rateLimited) {
-          pageDelay = DELAY_AFTER_429;
-          cleanStreak = 0;
-        } else {
-          cleanStreak++;
-          if (cleanStreak >= 3) { pageDelay = DELAY_NORMAL; }
-        }
-      } catch (e) {
-        log(`  [skip] hal.${pageNum} error: ${e.message}`);
-      }
-      if (pi < toProcess.length - 1) await new Promise(r => setTimeout(r, pageDelay));
-    }
-    progress('');
-    log(`  → ${chunkAssets} asset ditemukan (total sejauh ini: ${allAssets.length})`);
-
-    // Jeda kecil antar chunk agar tidak kena Groq rate limit
-    if (ci < totalChunks - 1) await new Promise(r => setTimeout(r, 2000));
-  }
-
-  log(`\n[3/4] Total: ${allAssets.length} asset dari ${totalRelevant} halaman relevan`);
+  log(`  → ${allAssets.length} asset ditemukan\n`);
 
   if (allAssets.length === 0) {
     log('\nTidak ada asset yang ditemukan. Selesai.');
