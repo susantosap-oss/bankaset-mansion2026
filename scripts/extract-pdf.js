@@ -116,7 +116,7 @@ const DELAY_NORMAL       = 5000;
 const DELAY_AFTER_429    = 30000;
 
 // ── Init Gemini SDK ──────────────────────────────────────────────────────────
-const { GoogleGenAI } = require(path.join(__dirname, '..', 'node_modules', '@google', 'genai', 'dist', 'index.js'));
+const { GoogleGenAI } = require('@google/genai');
 const genai = new GoogleGenAI({ apiKey: GEMINI_KEY });
 
 const JATIM_KW = [
