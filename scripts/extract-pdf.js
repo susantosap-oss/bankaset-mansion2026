@@ -141,7 +141,7 @@ async function splitPdfIfNeeded(pdfPath) {
 
     const chunkDoc   = await PDFDocument.create();
     const indices    = Array.from({ length: end - start }, (_, k) => start + k);
-    const copied     = await chunkDoc.copyPagesFrom(srcDoc, indices);
+    const copied     = await chunkDoc.copyPages(srcDoc, indices);
     copied.forEach(p => chunkDoc.addPage(p));
 
     const bytes     = await chunkDoc.save();
