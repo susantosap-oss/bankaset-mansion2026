@@ -106,11 +106,13 @@ if (!GROQ_KEY)  { console.error('Error: GROQ_API_KEY tidak ada di .env.local'); 
 if (!CLI_AUTH)  { console.error('Error: AUTH_SECRET tidak ada di .env.local'); process.exit(1); }
 
 // ── Config ───────────────────────────────────────────────────────────────────
-const GROQ_MODEL        = 'llama-3.3-70b-versatile';
-const CHUNK_SIZE        = 200;   // virtual chunk per iterasi
-const MAX_GROQ_PER_CHUNK = 50;  // max halaman relevan per chunk dikirim ke Groq
-const PAGE_TEXT_LIMIT   = 2000;
-const SAVE_BATCH_SIZE   = 400;  // max asset per 1 POST confirm
+const GROQ_MODEL         = 'llama-3.3-70b-versatile';
+const CHUNK_SIZE         = 200;  // virtual chunk per iterasi
+const MAX_GROQ_PER_CHUNK = 30;  // max halaman relevan per chunk dikirim ke Groq
+const PAGE_TEXT_LIMIT    = 2000;
+const SAVE_BATCH_SIZE    = 400;  // max asset per 1 POST confirm
+const DELAY_NORMAL       = 15000; // jeda antar halaman normal (ms)
+const DELAY_AFTER_429    = 40000; // jeda setelah kena rate limit (ms)
 
 const JATIM_KW = [
   'surabaya','sidoarjo','gresik','mojokerto','malang','kediri','jember',
@@ -141,7 +143,8 @@ function log(msg) { process.stdout.write(msg + '\n'); }
 function progress(msg) { process.stdout.write('\r\x1b[K' + msg); }
 
 // ── Groq extraction untuk 1 halaman ─────────────────────────────────────────
-async function extractPage(pageText, pageNumber, retries = 3) {
+// Returns { assets, rateLimited } — rateLimited=true jika sempat kena 429
+async function extractPage(pageText, pageNumber, retries = 3, _hadRateLimit = false) {
   const prompt = `Kamu adalah extractor data properti lelang bank Indonesia.
 Ekstrak semua data aset dari teks dokumen bank berikut.
 Kembalikan JSON object dengan key "assets" berisi array objek aset.
@@ -172,12 +175,12 @@ ${pageText.slice(0, PAGE_TEXT_LIMIT)}`;
   });
 
   if (res.status === 429) {
-    if (retries <= 0) { log(`  [skip] hal.${pageNumber} — Groq rate limit, lewati.`); return []; }
+    if (retries <= 0) { log(`  [skip] hal.${pageNumber} — Groq rate limit, lewati.`); return { assets: [], rateLimited: true }; }
     const retryAfter = parseInt(res.headers.get('retry-after') ?? '30', 10);
-    const waitSec = Math.min(retryAfter + 2, 90);
+    const waitSec = Math.min(retryAfter + 5, 100);
     log(`  [429] hal.${pageNumber} — tunggu ${waitSec}s... (retry ${4 - retries}/3)`);
     await new Promise(r => setTimeout(r, waitSec * 1000));
-    return extractPage(pageText, pageNumber, retries - 1);
+    return extractPage(pageText, pageNumber, retries - 1, true);
   }
   if (!res.ok) throw new Error(`Groq ${res.status}`);
 
@@ -190,7 +193,7 @@ ${pageText.slice(0, PAGE_TEXT_LIMIT)}`;
   const key = Object.keys(parsed).find(k => Array.isArray(parsed[k])) ?? '';
   const arr = key ? parsed[key] : [];
 
-  return arr
+  const assets = arr
     .filter(item => item && typeof item === 'object')
     .map(item => ({
       bankName,
@@ -219,6 +222,7 @@ ${pageText.slice(0, PAGE_TEXT_LIMIT)}`;
       confidence:          confidence(item),
       rawText:             pageText.slice(0, 300),
     }));
+  return { assets, rateLimited: _hadRateLimit };
 }
 
 // ── POST ke confirm endpoint ─────────────────────────────────────────────────
@@ -297,17 +301,26 @@ async function main() {
     log(`${label} ${relevant.length} hal. relevan → kirim ${toProcess.length} ke Groq...`);
 
     let chunkAssets = 0;
+    let pageDelay = DELAY_NORMAL;
+    let cleanStreak = 0;
     for (let pi = 0; pi < toProcess.length; pi++) {
       const { text, pageNum } = toProcess[pi];
       progress(`  Groq: ${pi + 1}/${toProcess.length} halaman (hal.${pageNum})...`);
       try {
-        const assets = await extractPage(text, pageNum);
+        const { assets, rateLimited } = await extractPage(text, pageNum);
         allAssets.push(...assets);
         chunkAssets += assets.length;
+        if (rateLimited) {
+          pageDelay = DELAY_AFTER_429;
+          cleanStreak = 0;
+        } else {
+          cleanStreak++;
+          if (cleanStreak >= 3) { pageDelay = DELAY_NORMAL; }
+        }
       } catch (e) {
         log(`  [skip] hal.${pageNum} error: ${e.message}`);
       }
-      if (pi < toProcess.length - 1) await new Promise(r => setTimeout(r, 10000));
+      if (pi < toProcess.length - 1) await new Promise(r => setTimeout(r, pageDelay));
     }
     progress('');
     log(`  → ${chunkAssets} asset ditemukan (total sejauh ini: ${allAssets.length})`);
