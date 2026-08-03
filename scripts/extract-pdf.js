@@ -108,10 +108,10 @@ if (!CLI_AUTH)  { console.error('Error: AUTH_SECRET tidak ada di .env.local'); p
 // ── Config ───────────────────────────────────────────────────────────────────
 const GROQ_MODEL         = 'llama-3.3-70b-versatile';
 const CHUNK_SIZE         = 200;  // virtual chunk per iterasi
-const MAX_GROQ_PER_CHUNK = 25;  // max halaman per chunk (6000 TPM / ~1750 token = ~3.4 hal/mnt)
-const PAGE_TEXT_LIMIT    = 2000;
+const MAX_GROQ_PER_CHUNK = 20;  // max halaman per chunk
+const PAGE_TEXT_LIMIT    = 1000; // diperkecil 50% untuk hemat token
 const SAVE_BATCH_SIZE    = 400;  // max asset per 1 POST confirm
-const DELAY_NORMAL       = 22000; // jeda antar halaman (ms) — aman di 6000 TPM
+const DELAY_NORMAL       = 22000; // jeda antar halaman (ms)
 const DELAY_AFTER_429    = 65000; // jeda setelah kena rate limit (ms)
 
 const JATIM_KW = [
@@ -145,33 +145,17 @@ function progress(msg) { process.stdout.write('\r\x1b[K' + msg); }
 // ── Groq extraction untuk 1 halaman ─────────────────────────────────────────
 // Returns { assets, rateLimited } — rateLimited=true jika sempat kena 429
 async function extractPage(pageText, pageNumber, retries = 3, _hadRateLimit = false) {
-  const prompt = `Kamu adalah extractor data properti lelang bank Indonesia.
-Ekstrak semua data aset dari teks dokumen bank berikut.
-Kembalikan JSON object dengan key "assets" berisi array objek aset.
-Jika tidak ada aset ditemukan, kembalikan { "assets": [] }.
+  const prompt = `Ekstrak aset properti dari teks lelang bank Indonesia. Kembalikan JSON {"assets":[...]}. Jika tidak ada, {"assets":[]}.
+Field setiap aset (0 atau "" jika tidak ada):
+assetType(RUMAH/LAHAN/RUKO/GUDANG/PABRIK/APARTEMEN/KANTOR/OTHER), city(kota kecil), district, area, address, marketValue(int rupiah), outstanding(int), landArea(m2), buildingArea(m2), debtorName, principalOutstanding(int), liquidationValue(int), limitPrice(int)
 
-Setiap aset harus memiliki field berikut (gunakan 0 atau "" jika tidak ditemukan):
-- assetType: salah satu dari [RUMAH, LAHAN, RUKO, GUDANG, PABRIK, APARTEMEN, KANTOR, OTHER]
-- city: nama kota/kabupaten (huruf kecil), misal "surabaya", "sidoarjo"
-- district: kecamatan atau kelurahan
-- area: desa/kelurahan
-- address: alamat lengkap
-- marketValue: integer nilai pasar/NJOP dalam rupiah
-- outstanding: integer baki debet/kewajiban dalam rupiah
-- landArea: angka luas tanah dalam m2
-- buildingArea: angka luas bangunan dalam m2
-- debtorName: nama debitur
-- principalOutstanding: integer pokok kredit dalam rupiah
-- liquidationValue: integer nilai likuidasi dalam rupiah
-- limitPrice: integer harga limit/harga dasar lelang dalam rupiah
-
-Teks dokumen:
+Teks:
 ${pageText.slice(0, PAGE_TEXT_LIMIT)}`;
 
   const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${GROQ_KEY}` },
-    body: JSON.stringify({ model: GROQ_MODEL, messages: [{ role: 'user', content: prompt }], temperature: 0.1, max_tokens: 1024 }),
+    body: JSON.stringify({ model: GROQ_MODEL, messages: [{ role: 'user', content: prompt }], temperature: 0.1, max_tokens: 512 }),
   });
 
   if (res.status === 429) {
