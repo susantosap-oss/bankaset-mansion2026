@@ -108,8 +108,8 @@ if (!CLI_AUTH)   { console.error('Error: AUTH_SECRET tidak ada di .env.local'); 
 
 // ── Config ───────────────────────────────────────────────────────────────────
 // Gemini free tier: 15 RPM, 1,000,000 TPM — jauh lebih longgar dari Groq
-const AI_MODEL           = 'gemini-2.5-flash-lite';
-const AI_API_URL         = `https://generativelanguage.googleapis.com/v1beta/models/${AI_MODEL}:generateContent`;
+const AI_MODEL           = 'gemini-2.0-flash';
+const AI_API_URL         = `https://generativelanguage.googleapis.com/v1/models/${AI_MODEL}:generateContent`;
 const CHUNK_SIZE         = 200;  // virtual chunk per iterasi
 const MAX_GROQ_PER_CHUNK = 20;  // max halaman per chunk
 const PAGE_TEXT_LIMIT    = 2000; // dikembalikan ke 2000 — TPM Gemini sangat longgar
@@ -263,7 +263,7 @@ async function main() {
         log(`  Error: ${msg}`);
       } else if (testRes.status === 404) {
         log(`  ✗ Model '${AI_MODEL}' tidak ditemukan. Mencari model yang tersedia...`);
-        const listRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${GEMINI_KEY}`);
+        const listRes = await fetch(`https://generativelanguage.googleapis.com/v1/models?key=${GEMINI_KEY}`);
         if (listRes.ok) {
           const listData = await listRes.json();
           const available = (listData.models ?? [])
