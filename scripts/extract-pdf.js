@@ -111,8 +111,8 @@ const CHUNK_SIZE         = 200;  // virtual chunk per iterasi
 const MAX_GROQ_PER_CHUNK = 30;  // max halaman relevan per chunk dikirim ke Groq
 const PAGE_TEXT_LIMIT    = 2000;
 const SAVE_BATCH_SIZE    = 400;  // max asset per 1 POST confirm
-const DELAY_NORMAL       = 15000; // jeda antar halaman normal (ms)
-const DELAY_AFTER_429    = 40000; // jeda setelah kena rate limit (ms)
+const DELAY_NORMAL       = 35000; // jeda antar halaman normal (ms) — ~1.7 hal/mnt aman di 6000 TPM
+const DELAY_AFTER_429    = 70000; // jeda setelah kena rate limit (ms)
 
 const JATIM_KW = [
   'surabaya','sidoarjo','gresik','mojokerto','malang','kediri','jember',
