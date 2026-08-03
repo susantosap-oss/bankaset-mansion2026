@@ -91,7 +91,8 @@ async function pickPdfFromFolder() {
       const idx = parseInt(answer.trim(), 10) - 1;
       if (isNaN(idx) || idx < 0 || idx >= files.length) {
         console.error('Pilihan tidak valid');
-        process.exit(1);
+        setTimeout(() => process.exit(1), 100);
+      return;
       }
       resolve(path.join(folder, files[idx]));
     });
@@ -107,7 +108,7 @@ if (!CLI_AUTH)   { console.error('Error: AUTH_SECRET tidak ada di .env.local'); 
 
 // ── Config ───────────────────────────────────────────────────────────────────
 // Gemini free tier: 15 RPM, 1,000,000 TPM — jauh lebih longgar dari Groq
-const AI_MODEL           = 'gemini-2.0-flash';
+const AI_MODEL           = 'gemini-1.5-flash-latest';
 const AI_API_URL         = `https://generativelanguage.googleapis.com/v1beta/models/${AI_MODEL}:generateContent`;
 const CHUNK_SIZE         = 200;  // virtual chunk per iterasi
 const MAX_GROQ_PER_CHUNK = 20;  // max halaman per chunk
@@ -263,7 +264,8 @@ async function main() {
       } else {
         log(`  ✗ Gemini error ${testRes.status}: ${msg}`);
       }
-      process.exit(1);
+      setTimeout(() => process.exit(1), 100);
+      return;
     }
     log('  ✓ Gemini OK\n');
   } catch (e) {
