@@ -4,16 +4,19 @@
 /**
  * extract-pdf.js — CLI tool untuk ekstrak asset dari PDF besar (bypass Cloud Run upload limit)
  *
- * Usage:
+ * Usage (mode 1 — pilih file dari folder):
+ *   node scripts/extract-pdf.js <bankName> <LELANG|CASSIE> [server-url]
+ *
+ * Usage (mode 2 — path langsung):
  *   node scripts/extract-pdf.js <pdf-path> <bankName> <LELANG|CASSIE> [server-url]
  *
- * Contoh:
- *   node scripts/extract-pdf.js "C:/Users/mansion/Downloads/BTN Lelang.pdf" "BTN" LELANG
- *   node scripts/extract-pdf.js "BTN.pdf" "BRI Surabaya" CASSIE https://bankaset-mansion2026-diodfcxltq-et.a.run.app
+ * Default folder PDF: PDF_FOLDER di .env.local, atau ~/Downloads
  */
 
-const fs   = require('fs');
-const path = require('path');
+const fs       = require('fs');
+const path     = require('path');
+const os       = require('os');
+const readline = require('readline');
 
 // ── Load .env.local ──────────────────────────────────────────────────────────
 const envPath = path.join(__dirname, '..', '.env.local');
@@ -30,19 +33,71 @@ if (fs.existsSync(envPath)) {
 }
 
 // ── Args ─────────────────────────────────────────────────────────────────────
-const [,, pdfArg, bankName, labelAsset, serverArg] = process.argv;
+// Mode 1: <bankName> <LELANG|CASSIE> [server-url]       → pilih file interaktif
+// Mode 2: <pdf-path> <bankName> <LELANG|CASSIE> [url]   → path langsung (backward compat)
+const firstArg = process.argv[2];
+const isPdfPath = firstArg && (firstArg.toLowerCase().endsWith('.pdf') || firstArg.includes('/') || firstArg.includes('\\'));
 
-if (!pdfArg || !bankName || !labelAsset) {
-  console.log('\nUsage: node scripts/extract-pdf.js <pdf-path> <bankName> <LELANG|CASSIE> [server-url]\n');
-  console.log('Contoh:');
-  console.log('  node scripts/extract-pdf.js "C:/Downloads/BTN Lelang.pdf" "BTN" LELANG');
+let bankName, labelAsset, serverArg, resolvedPdfPath;
+
+if (isPdfPath) {
+  [,, , bankName, labelAsset, serverArg] = process.argv;
+  resolvedPdfPath = path.resolve(firstArg);
+} else {
+  [,, bankName, labelAsset, serverArg] = process.argv;
+  resolvedPdfPath = null; // akan dipilih secara interaktif
+}
+
+if (!bankName || !labelAsset) {
+  console.log('\nUsage (pilih file):  node scripts/extract-pdf.js <bankName> <LELANG|CASSIE>');
+  console.log('Usage (path langsung): node scripts/extract-pdf.js <pdf-path> <bankName> <LELANG|CASSIE>\n');
   process.exit(1);
 }
 if (!['LELANG', 'CASSIE'].includes(labelAsset)) {
   console.error('Error: labelAsset harus LELANG atau CASSIE'); process.exit(1);
 }
 
-const pdfPath  = path.resolve(pdfArg);
+// ── Pilih PDF dari folder ────────────────────────────────────────────────────
+async function pickPdfFromFolder() {
+  const folder = process.env.PDF_FOLDER || path.join(os.homedir(), 'Downloads');
+
+  if (!fs.existsSync(folder)) {
+    console.error(`Error: Folder tidak ditemukan: ${folder}`);
+    console.error('Set PDF_FOLDER di .env.local untuk mengubah lokasi default.');
+    process.exit(1);
+  }
+
+  const files = fs.readdirSync(folder)
+    .filter(f => f.toLowerCase().endsWith('.pdf'))
+    .sort();
+
+  if (files.length === 0) {
+    console.error(`Error: Tidak ada file PDF di: ${folder}`);
+    process.exit(1);
+  }
+
+  if (files.length === 1) {
+    log(`  → Auto-pilih: ${files[0]}`);
+    return path.join(folder, files[0]);
+  }
+
+  log(`\nFile PDF di ${folder}:`);
+  files.forEach((f, i) => log(`  [${i + 1}] ${f}`));
+
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  return new Promise((resolve) => {
+    rl.question('\nPilih nomor file: ', (answer) => {
+      rl.close();
+      const idx = parseInt(answer.trim(), 10) - 1;
+      if (isNaN(idx) || idx < 0 || idx >= files.length) {
+        console.error('Pilihan tidak valid');
+        process.exit(1);
+      }
+      resolve(path.join(folder, files[idx]));
+    });
+  });
+}
+
 const SERVER   = (serverArg || 'https://bankaset-mansion2026-diodfcxltq-et.a.run.app').replace(/\/$/, '');
 const GROQ_KEY = process.env.GROQ_API_KEY;
 const CLI_AUTH = process.env.AUTH_SECRET;
@@ -184,6 +239,9 @@ async function saveAssets(assets) {
 
 // ── Main ─────────────────────────────────────────────────────────────────────
 async function main() {
+  // Resolve PDF path (interaktif jika belum ditentukan)
+  const pdfPath = resolvedPdfPath ?? await pickPdfFromFolder();
+
   log('');
   log('═══════════════════════════════════════════════════════');
   log('  Bankaset — PDF Extractor CLI');
