@@ -261,13 +261,26 @@ async function main() {
       if (testRes.status === 429) {
         log(`  ✗ Gemini quota habis (429). Coba lagi nanti atau pakai akun Google lain.`);
         log(`  Error: ${msg}`);
+      } else if (testRes.status === 404) {
+        log(`  ✗ Model '${AI_MODEL}' tidak ditemukan. Mencari model yang tersedia...`);
+        const listRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${GEMINI_KEY}`);
+        if (listRes.ok) {
+          const listData = await listRes.json();
+          const available = (listData.models ?? [])
+            .filter(m => m.supportedGenerationMethods?.includes('generateContent'))
+            .map(m => m.name.replace('models/', ''));
+          log(`\n  Model tersedia di akun Anda:\n  ${available.join('\n  ')}`);
+          log(`\n  → Update AI_MODEL di scripts/extract-pdf.js dengan salah satu model di atas.`);
+        } else {
+          log(`  ✗ Gemini error ${testRes.status}: ${msg}`);
+        }
       } else {
         log(`  ✗ Gemini error ${testRes.status}: ${msg}`);
       }
       setTimeout(() => process.exit(1), 100);
       return;
     }
-    log('  ✓ Gemini OK\n');
+    log(`  ✓ Gemini OK (${AI_MODEL})\n`);
   } catch (e) {
     log(`  ✗ Tidak bisa connect ke Gemini: ${e.message}`);
     process.exit(1);
