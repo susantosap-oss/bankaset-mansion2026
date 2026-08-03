@@ -108,7 +108,7 @@ if (!CLI_AUTH)   { console.error('Error: AUTH_SECRET tidak ada di .env.local'); 
 // ── Config ───────────────────────────────────────────────────────────────────
 // Gemini free tier: 15 RPM, 1,000,000 TPM — jauh lebih longgar dari Groq
 const AI_MODEL           = 'gemini-2.0-flash';
-const AI_API_URL         = 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions';
+const AI_API_URL         = `https://generativelanguage.googleapis.com/v1beta/models/${AI_MODEL}:generateContent`;
 const CHUNK_SIZE         = 200;  // virtual chunk per iterasi
 const MAX_GROQ_PER_CHUNK = 20;  // max halaman per chunk
 const PAGE_TEXT_LIMIT    = 2000; // dikembalikan ke 2000 — TPM Gemini sangat longgar
@@ -154,10 +154,13 @@ assetType(RUMAH/LAHAN/RUKO/GUDANG/PABRIK/APARTEMEN/KANTOR/OTHER), city(kota keci
 Teks:
 ${pageText.slice(0, PAGE_TEXT_LIMIT)}`;
 
-  const res = await fetch(AI_API_URL, {
+  const res = await fetch(`${AI_API_URL}?key=${GEMINI_KEY}`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${GEMINI_KEY}` },
-    body: JSON.stringify({ model: AI_MODEL, messages: [{ role: 'user', content: prompt }], temperature: 0.1, max_tokens: 1024 }),
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      contents: [{ role: 'user', parts: [{ text: prompt }] }],
+      generationConfig: { temperature: 0.1, maxOutputTokens: 1024 },
+    }),
   });
 
   if (res.status === 429) {
@@ -171,7 +174,7 @@ ${pageText.slice(0, PAGE_TEXT_LIMIT)}`;
   if (!res.ok) throw new Error(`Gemini ${res.status}: ${await res.text().catch(() => '')}`);
 
   const data = await res.json();
-  const raw  = data.choices?.[0]?.message?.content ?? '{}';
+  const raw  = data.candidates?.[0]?.content?.parts?.[0]?.text ?? '{}';
 
   let parsed = {};
   try { const m = raw.match(/\{[\s\S]*\}/); parsed = m ? JSON.parse(m[0]) : {}; } catch { return { assets: [], rateLimited: _hadRateLimit }; }
