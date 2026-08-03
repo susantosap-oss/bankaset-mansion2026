@@ -5,13 +5,14 @@ import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
 import {
   LayoutDashboard, Building2, Settings,
-  Map, LogIn,
+  Map, LogIn, Upload,
 } from 'lucide-react';
 
 const NAV_ITEMS = [
   { label: 'Dashboard',           href: '/',                   icon: LayoutDashboard, public: true,  requiresAuth: false },
   { label: 'Asset Bank',          href: '/assets',             icon: Building2,       public: true,  requiresAuth: false },
   { label: 'Market Intelligence', href: '/market-intelligence', icon: Map,             public: true,  requiresAuth: false },
+  { label: 'Import Asset',        href: '/pdf-import',         icon: Upload,          public: false, requiresAuth: true  },
   { label: 'Pengaturan',          href: '/settings',           icon: Settings,        public: true,  requiresAuth: true  },
 ];
 
