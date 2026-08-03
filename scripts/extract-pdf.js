@@ -108,7 +108,7 @@ if (!CLI_AUTH)   { console.error('Error: AUTH_SECRET tidak ada di .env.local'); 
 
 // ── Config ───────────────────────────────────────────────────────────────────
 // Gemini free tier: 15 RPM, 1,000,000 TPM — jauh lebih longgar dari Groq
-const AI_MODEL           = 'gemini-1.5-flash-latest';
+const AI_MODEL           = 'gemini-2.0-flash-lite';
 const AI_API_URL         = `https://generativelanguage.googleapis.com/v1beta/models/${AI_MODEL}:generateContent`;
 const CHUNK_SIZE         = 200;  // virtual chunk per iterasi
 const MAX_GROQ_PER_CHUNK = 20;  // max halaman per chunk
