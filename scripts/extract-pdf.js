@@ -195,7 +195,7 @@ Setiap objek aset harus memiliki field berikut (gunakan 0 atau "" jika tidak dit
       { fileData: { fileUri: uploadedFile.uri, mimeType: 'application/pdf' } },
       { text: prompt },
     ],
-    config: { responseMimeType: 'application/json', maxOutputTokens: 8192, temperature: 0.1 },
+    config: { responseMimeType: 'application/json', maxOutputTokens: 65536, temperature: 0.1 },
   });
 
   let arr = [];
