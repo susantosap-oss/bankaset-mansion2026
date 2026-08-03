@@ -130,28 +130,30 @@ async function splitPdfIfNeeded(pdfPath) {
   const numChunks = Math.ceil(sizeMB / TARGET_CHUNK_MB);
   const perChunk  = Math.ceil(total / numChunks);
 
-  const tmpDir   = os.tmpdir();
-  const base     = path.basename(pdfPath, '.pdf');
-  const paths    = [];
+  const chunkDir = path.join(path.dirname(pdfPath), path.basename(pdfPath, '.pdf') + '_chunks');
+  if (!fs.existsSync(chunkDir)) fs.mkdirSync(chunkDir);
+  const base  = path.basename(pdfPath, '.pdf');
+  const paths = [];
 
   for (let i = 0; i < numChunks; i++) {
     const start = i * perChunk;
     const end   = Math.min(start + perChunk, total);
     if (start >= total) break;
 
-    const chunkDoc   = await PDFDocument.create();
-    const indices    = Array.from({ length: end - start }, (_, k) => start + k);
-    const copied     = await chunkDoc.copyPages(srcDoc, indices);
+    const chunkDoc = await PDFDocument.create();
+    const indices  = Array.from({ length: end - start }, (_, k) => start + k);
+    const copied   = await chunkDoc.copyPages(srcDoc, indices);
     copied.forEach(p => chunkDoc.addPage(p));
 
     const bytes     = await chunkDoc.save();
-    const chunkPath = path.join(tmpDir, `${base}_chunk${i + 1}of${numChunks}.pdf`);
+    const chunkPath = path.join(chunkDir, `${base}_chunk${i + 1}of${numChunks}.pdf`);
     fs.writeFileSync(chunkPath, bytes);
     paths.push(chunkPath);
-    log(`  → Chunk ${i + 1}/${numChunks}: hal. ${start + 1}–${end} | ${(bytes.length / 1024 / 1024).toFixed(1)} MB → ${path.basename(chunkPath)}`);
+    log(`  → Chunk ${i + 1}/${numChunks}: hal. ${start + 1}–${end} | ${(bytes.length / 1024 / 1024).toFixed(1)} MB`);
   }
 
-  return { paths, isTemp: true };
+  log(`  → Folder chunk: ${chunkDir}\n`);
+  return { paths, isTemp: false };
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -312,19 +314,11 @@ async function main() {
 
   // 2+3. Upload & ekstrak setiap chunk
   const allAssets = [];
-  try {
-    for (let ci = 0; ci < totalChunks; ci++) {
-      if (totalChunks > 1) log(`\n[2+3/4] Chunk ${ci + 1}/${totalChunks}: ${path.basename(chunkPaths[ci])}`);
-      const chunkAssets = await extractAllFromPdf(chunkPaths[ci]);
-      log(`  → ${chunkAssets.length} asset ditemukan`);
-      allAssets.push(...chunkAssets);
-    }
-  } finally {
-    if (isTemp) {
-      for (const p of chunkPaths) {
-        try { fs.unlinkSync(p); } catch { /* ignore */ }
-      }
-    }
+  for (let ci = 0; ci < totalChunks; ci++) {
+    if (totalChunks > 1) log(`\n[2+3/4] Chunk ${ci + 1}/${totalChunks}: ${path.basename(chunkPaths[ci])}`);
+    const chunkAssets = await extractAllFromPdf(chunkPaths[ci]);
+    log(`  → ${chunkAssets.length} asset ditemukan`);
+    allAssets.push(...chunkAssets);
   }
 
   log(`\n  → Total: ${allAssets.length} asset dari ${totalChunks} chunk\n`);
