@@ -107,12 +107,52 @@ if (!GEMINI_KEY) { console.error('Error: GEMINI_API_KEY tidak ada di .env.local'
 if (!CLI_AUTH)   { console.error('Error: AUTH_SECRET tidak ada di .env.local'); process.exit(1); }
 
 // ── Config ───────────────────────────────────────────────────────────────────
-const AI_MODEL        = 'gemini-flash-latest';
-const SAVE_BATCH_SIZE = 400;
+const AI_MODEL          = 'gemini-flash-latest';
+const SAVE_BATCH_SIZE   = 400;
+const SPLIT_THRESHOLD_MB = 50;   // split jika PDF > 50 MB
+const TARGET_CHUNK_MB    = 40;   // target ukuran per chunk
 
 // ── Init Gemini SDK ──────────────────────────────────────────────────────────
-const { GoogleGenAI } = require('@google/genai');
+const { GoogleGenAI }  = require('@google/genai');
+const { PDFDocument }  = require('pdf-lib');
 const genai = new GoogleGenAI({ apiKey: GEMINI_KEY });
+
+// ── Split PDF menjadi beberapa chunk jika terlalu besar ──────────────────────
+async function splitPdfIfNeeded(pdfPath) {
+  const sizeMB = fs.statSync(pdfPath).size / 1024 / 1024;
+  if (sizeMB <= SPLIT_THRESHOLD_MB) return { paths: [pdfPath], isTemp: false };
+
+  log(`[split] File ${sizeMB.toFixed(1)} MB > ${SPLIT_THRESHOLD_MB} MB — memecah PDF...`);
+
+  const pdfBytes = fs.readFileSync(pdfPath);
+  const srcDoc   = await PDFDocument.load(pdfBytes);
+  const total    = srcDoc.getPageCount();
+  const numChunks = Math.ceil(sizeMB / TARGET_CHUNK_MB);
+  const perChunk  = Math.ceil(total / numChunks);
+
+  const tmpDir   = os.tmpdir();
+  const base     = path.basename(pdfPath, '.pdf');
+  const paths    = [];
+
+  for (let i = 0; i < numChunks; i++) {
+    const start = i * perChunk;
+    const end   = Math.min(start + perChunk, total);
+    if (start >= total) break;
+
+    const chunkDoc   = await PDFDocument.create();
+    const indices    = Array.from({ length: end - start }, (_, k) => start + k);
+    const copied     = await chunkDoc.copyPagesFrom(srcDoc, indices);
+    copied.forEach(p => chunkDoc.addPage(p));
+
+    const bytes     = await chunkDoc.save();
+    const chunkPath = path.join(tmpDir, `${base}_chunk${i + 1}of${numChunks}.pdf`);
+    fs.writeFileSync(chunkPath, bytes);
+    paths.push(chunkPath);
+    log(`  → Chunk ${i + 1}/${numChunks}: hal. ${start + 1}–${end} | ${(bytes.length / 1024 / 1024).toFixed(1)} MB → ${path.basename(chunkPath)}`);
+  }
+
+  return { paths, isTemp: true };
+}
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 function confidence(item) {
@@ -265,10 +305,29 @@ async function main() {
   const sizeMB = (fs.statSync(pdfPath).size / 1024 / 1024).toFixed(1);
   log(`[1/4] File siap: ${sizeMB} MB`);
 
-  // 2+3. Upload PDF ke Gemini & ekstrak semua aset dalam 1 request
-  const allAssets = await extractAllFromPdf(pdfPath);
+  // 1b. Split jika perlu
+  const { paths: chunkPaths, isTemp } = await splitPdfIfNeeded(pdfPath);
+  const totalChunks = chunkPaths.length;
+  if (totalChunks > 1) log(`  → Dipecah menjadi ${totalChunks} chunk\n`);
 
-  log(`  → ${allAssets.length} asset ditemukan\n`);
+  // 2+3. Upload & ekstrak setiap chunk
+  const allAssets = [];
+  try {
+    for (let ci = 0; ci < totalChunks; ci++) {
+      if (totalChunks > 1) log(`\n[2+3/4] Chunk ${ci + 1}/${totalChunks}: ${path.basename(chunkPaths[ci])}`);
+      const chunkAssets = await extractAllFromPdf(chunkPaths[ci]);
+      log(`  → ${chunkAssets.length} asset ditemukan`);
+      allAssets.push(...chunkAssets);
+    }
+  } finally {
+    if (isTemp) {
+      for (const p of chunkPaths) {
+        try { fs.unlinkSync(p); } catch { /* ignore */ }
+      }
+    }
+  }
+
+  log(`\n  → Total: ${allAssets.length} asset dari ${totalChunks} chunk\n`);
 
   if (allAssets.length === 0) {
     log('\nTidak ada asset yang ditemukan. Selesai.');
