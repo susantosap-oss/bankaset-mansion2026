@@ -106,13 +106,13 @@ if (!GROQ_KEY)  { console.error('Error: GROQ_API_KEY tidak ada di .env.local'); 
 if (!CLI_AUTH)  { console.error('Error: AUTH_SECRET tidak ada di .env.local'); process.exit(1); }
 
 // ── Config ───────────────────────────────────────────────────────────────────
-const GROQ_MODEL         = 'llama-3.3-70b-versatile';
+const GROQ_MODEL         = 'llama-3.1-8b-instant'; // 131k TPM vs 6k TPM di 70b
 const CHUNK_SIZE         = 200;  // virtual chunk per iterasi
 const MAX_GROQ_PER_CHUNK = 30;  // max halaman relevan per chunk dikirim ke Groq
 const PAGE_TEXT_LIMIT    = 2000;
 const SAVE_BATCH_SIZE    = 400;  // max asset per 1 POST confirm
-const DELAY_NORMAL       = 35000; // jeda antar halaman normal (ms) — ~1.7 hal/mnt aman di 6000 TPM
-const DELAY_AFTER_429    = 70000; // jeda setelah kena rate limit (ms)
+const DELAY_NORMAL       = 5000;  // jeda antar halaman normal (ms)
+const DELAY_AFTER_429    = 40000; // jeda setelah kena rate limit (ms)
 
 const JATIM_KW = [
   'surabaya','sidoarjo','gresik','mojokerto','malang','kediri','jember',

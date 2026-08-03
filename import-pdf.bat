@@ -18,35 +18,81 @@ if errorlevel 1 (
 
 :: Default folder
 set "DEFAULT_FOLDER=D:\Data AsetBank"
-set "IS_FOLDER=0"
 set "PDF_PATH="
 
-:: PDF Path: dari drag-and-drop, folder, atau file tunggal
+:: PDF Path dari drag-and-drop atau input manual
 if not "%~1"=="" (
   set "PDF_PATH=%~1"
   echo Input : !PDF_PATH!
-) else (
+  goto cek_path
+)
+
+:: Tidak ada drag-and-drop — cek apakah DEFAULT_FOLDER punya file PDF
+set "PDF_COUNT=0"
+for %%F in ("!DEFAULT_FOLDER!\*.pdf") do set /a PDF_COUNT+=1
+
+if !PDF_COUNT!==0 (
   echo Drag folder/file PDF ke icon ini, atau ketik path di bawah.
   echo Default [Enter] : !DEFAULT_FOLDER!
   echo.
   set /p "PDF_PATH=Path PDF/Folder : "
+  if "!PDF_PATH!"=="" set "PDF_PATH=!DEFAULT_FOLDER!"
+  goto cek_path
 )
 
-if "!PDF_PATH!"=="" set "PDF_PATH=!DEFAULT_FOLDER!"
+if !PDF_COUNT!==1 (
+  for %%F in ("!DEFAULT_FOLDER!\*.pdf") do set "PDF_PATH=%%F"
+  echo Auto-pilih : !PDF_PATH!
+  goto cek_bank
+)
 
-:: Cek apakah path adalah folder atau file
-if exist "!PDF_PATH!\" (
-  set "IS_FOLDER=1"
-  echo Folder : !PDF_PATH!
-) else if exist "!PDF_PATH!" (
-  set "IS_FOLDER=0"
-  echo File   : !PDF_PATH!
-) else (
-  echo Path tidak ditemukan: !PDF_PATH!
+:: Ada beberapa PDF — tampilkan daftar pilihan
+echo File PDF di !DEFAULT_FOLDER!:
+echo.
+set "IDX=0"
+for %%F in ("!DEFAULT_FOLDER!\*.pdf") do (
+  set /a IDX+=1
+  set "FILE_!IDX!=%%F"
+  echo   [!IDX!] %%~nxF
+)
+echo.
+set /p "PICK=Pilih nomor file [1-!IDX!] : "
+
+if "!PICK!"=="" (
+  echo Pilihan tidak valid.
+  pause
+  exit /b 1
+)
+set "PDF_PATH=!FILE_%PICK%!"
+if "!PDF_PATH!"=="" (
+  echo Nomor tidak valid.
+  pause
+  exit /b 1
+)
+echo Dipilih : !PDF_PATH!
+goto cek_bank
+
+:cek_path
+if "!PDF_PATH!"=="" (
+  echo Path tidak boleh kosong.
   pause
   exit /b 1
 )
 
+:: Cek apakah path adalah folder
+if exist "!PDF_PATH!\" (
+  echo Folder : !PDF_PATH!
+  goto cek_bank
+)
+if exist "!PDF_PATH!" (
+  echo File   : !PDF_PATH!
+  goto cek_bank
+)
+echo Path tidak ditemukan: !PDF_PATH!
+pause
+exit /b 1
+
+:cek_bank
 echo.
 set /p "BANK_NAME=Nama Bank  : "
 if "!BANK_NAME!"=="" (
@@ -75,7 +121,8 @@ echo   Memulai ekstraksi... jangan tutup window ini
 echo =====================================================
 echo.
 
-if "!IS_FOLDER!"=="1" (
+:: Cek apakah path adalah folder (untuk batch processing)
+if exist "!PDF_PATH!\" (
   set "COUNT=0"
   for %%F in ("!PDF_PATH!\*.pdf") do (
     echo [%%~nxF]
