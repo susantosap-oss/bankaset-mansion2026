@@ -150,7 +150,14 @@ ${pageText.slice(0, PAGE_TEXT_LIMIT)}`;
       buildingArea:        Number(item.buildingArea ?? 0),
       debtorName:          String(item.debtorName ?? ''),
       principalOutstanding:Number(item.principalOutstanding ?? 0),
-      liquidationRatio:    0,
+      liquidationRatio:    (() => {
+        if (labelAsset === 'LELANG') {
+          const mv = Number(item.marketValue ?? 0);
+          const lp = Number(item.limitPrice ?? 0);
+          return mv > 0 && lp > 0 ? Math.round((lp / mv) * 100) / 100 : 0;
+        }
+        return 0;
+      })(),
       liquidationValue:    Number(item.liquidationValue ?? 0),
       limitPrice:          Number(item.limitPrice ?? 0),
       pageNumber,

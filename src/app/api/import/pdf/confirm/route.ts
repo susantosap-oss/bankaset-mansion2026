@@ -75,6 +75,13 @@ export async function POST(req: NextRequest) {
         ? (a.outstanding || 0)
         : (a.limitPrice ?? 0);
 
+      // Ratio per label:
+      // Cassie  -> Sisa Hutang Pokok / Outstanding
+      // Lelang  -> Limit Price / Market Value (diskon dari pasar)
+      const liquidationRatio = labelAsset === 'LELANG'
+        ? (a.limitPrice && a.marketValue ? Math.round((a.limitPrice / a.marketValue) * 100) / 100 : undefined)
+        : (a.liquidationRatio || undefined);
+
       toSave.push({
         bankName: a.bankName || bankName,
         assetType: normalizeAssetType(a.assetType),
@@ -90,7 +97,7 @@ export async function POST(req: NextRequest) {
         rawRowRef: `pdf:halaman-${a.pageNumber}`,
         debtorName: a.debtorName || undefined,
         principalOutstanding: a.principalOutstanding || undefined,
-        liquidationRatio: a.liquidationRatio || undefined,
+        liquidationRatio,
         liquidationValue: a.liquidationValue || undefined,
         limitPrice,
         labelAsset,
