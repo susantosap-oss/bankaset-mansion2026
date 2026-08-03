@@ -168,10 +168,26 @@ async function extractAllFromPdf(pdfPath) {
   log(`  ✓ Upload selesai\n`);
 
   log('[3/4] Ekstrak semua aset (1 request ke Gemini)...');
-  const prompt = `Ekstrak SEMUA aset properti lelang bank dari dokumen PDF ini yang berlokasi di Jawa Timur (Surabaya, Sidoarjo, Gresik, Mojokerto, Malang, Kediri, Jember, dan kota/kabupaten lain di Jawa Timur).
-Kembalikan HANYA JSON valid: {"assets":[...]}. Jika tidak ada, {"assets":[]}.
-Field setiap aset (integer rupiah untuk nilai uang, angka untuk luas, "" jika tidak ada):
-assetType(RUMAH/LAHAN/RUKO/GUDANG/PABRIK/APARTEMEN/KANTOR/OTHER), city(nama kota huruf kecil), district(kecamatan), area(kelurahan), address(alamat lengkap), marketValue, outstanding, landArea, buildingArea, debtorName, principalOutstanding, liquidationValue, limitPrice`;
+  const prompt = `Baca seluruh dokumen PDF ini dari awal sampai akhir.
+Tugas: Cari dan ekstrak SEMUA data aset/properti/listing yang ada dalam dokumen ini. Ambil setiap entitas yang terdaftar tanpa ada yang terlewat. Setiap baris tabel = 1 aset.
+
+Kembalikan HANYA JSON valid dengan format: {"assets": [...]}
+Jika tidak ada data, kembalikan: {"assets": []}
+
+Setiap objek aset harus memiliki field berikut (gunakan 0 atau "" jika tidak ditemukan di dokumen):
+- assetType: kategori properti (RUMAH/LAHAN/RUKO/GUDANG/PABRIK/APARTEMEN/KANTOR/OTHER)
+- city: nama kota atau kabupaten dalam huruf kecil
+- district: nama kecamatan
+- area: nama kelurahan atau desa
+- address: alamat lengkap properti
+- marketValue: nilai pasar atau NJOP dalam rupiah (integer)
+- outstanding: baki debet atau total kewajiban dalam rupiah (integer)
+- landArea: luas tanah dalam m2 (angka)
+- buildingArea: luas bangunan dalam m2 (angka)
+- debtorName: nama debitur atau pemilik
+- principalOutstanding: pokok kredit dalam rupiah (integer)
+- liquidationValue: nilai likuidasi dalam rupiah (integer)
+- limitPrice: harga limit atau harga dasar lelang dalam rupiah (integer)`;
 
   const response = await genai.models.generateContent({
     model: AI_MODEL,
@@ -188,6 +204,10 @@ assetType(RUMAH/LAHAN/RUKO/GUDANG/PABRIK/APARTEMEN/KANTOR/OTHER), city(nama kota
     const key = Object.keys(parsed).find(k => Array.isArray(parsed[k])) ?? '';
     arr = key ? parsed[key] : [];
   } catch { arr = []; }
+
+  if (arr.length === 0) {
+    log(`  [debug] Response Gemini (200 char pertama): ${(response.text ?? '').slice(0, 200)}`);
+  }
 
   return arr.filter(item => item && typeof item === 'object').map(mapAsset);
 }
