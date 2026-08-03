@@ -246,6 +246,31 @@ async function main() {
   log('═══════════════════════════════════════════════════════');
   log('');
 
+  // 0. Test konektivitas Gemini
+  log('[0/4] Cek koneksi Gemini API...');
+  try {
+    const testRes = await fetch(`${AI_API_URL}?key=${GEMINI_KEY}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: 'ping' }] }], generationConfig: { maxOutputTokens: 5 } }),
+    });
+    if (!testRes.ok) {
+      const errBody = await testRes.json().catch(() => ({}));
+      const msg = errBody?.error?.message ?? testRes.status;
+      if (testRes.status === 429) {
+        log(`  ✗ Gemini quota habis (429). Coba lagi nanti atau pakai akun Google lain.`);
+        log(`  Error: ${msg}`);
+      } else {
+        log(`  ✗ Gemini error ${testRes.status}: ${msg}`);
+      }
+      process.exit(1);
+    }
+    log('  ✓ Gemini OK\n');
+  } catch (e) {
+    log(`  ✗ Tidak bisa connect ke Gemini: ${e.message}`);
+    process.exit(1);
+  }
+
   // 1. Baca file
   if (!fs.existsSync(pdfPath)) { console.error(`Error: File tidak ditemukan: ${pdfPath}`); process.exit(1); }
   const buffer  = fs.readFileSync(pdfPath);
