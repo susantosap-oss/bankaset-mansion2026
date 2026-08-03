@@ -107,15 +107,17 @@ if (!GEMINI_KEY) { console.error('Error: GEMINI_API_KEY tidak ada di .env.local'
 if (!CLI_AUTH)   { console.error('Error: AUTH_SECRET tidak ada di .env.local'); process.exit(1); }
 
 // ── Config ───────────────────────────────────────────────────────────────────
-// gemini-2.5-flash-lite: free tier 1000 RPD, tidak kena limit:0
 const AI_MODEL           = 'gemini-2.5-flash';
-const AI_API_URL         = `https://generativelanguage.googleapis.com/v1alpha/models/${AI_MODEL}:generateContent`;
 const CHUNK_SIZE         = 200;
 const MAX_GROQ_PER_CHUNK = 20;
 const PAGE_TEXT_LIMIT    = 2000;
 const SAVE_BATCH_SIZE    = 400;
 const DELAY_NORMAL       = 5000;
 const DELAY_AFTER_429    = 30000;
+
+// ── Init Gemini SDK ──────────────────────────────────────────────────────────
+const { GoogleGenAI } = require(path.join(__dirname, '..', 'node_modules', '@google', 'genai', 'dist', 'index.js'));
+const genai = new GoogleGenAI({ apiKey: GEMINI_KEY });
 
 const JATIM_KW = [
   'surabaya','sidoarjo','gresik','mojokerto','malang','kediri','jember',
@@ -155,27 +157,25 @@ assetType(RUMAH/LAHAN/RUKO/GUDANG/PABRIK/APARTEMEN/KANTOR/OTHER), city(kota keci
 Teks:
 ${pageText.slice(0, PAGE_TEXT_LIMIT)}`;
 
-  const res = await fetch(`${AI_API_URL}?key=${GEMINI_KEY}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      contents: [{ role: 'user', parts: [{ text: prompt }] }],
-      generationConfig: { temperature: 0.1, maxOutputTokens: 1024 },
-    }),
-  });
-
-  if (res.status === 429) {
-    if (retries <= 0) { log(`  [skip] hal.${pageNumber} — rate limit, lewati.`); return { assets: [], rateLimited: true }; }
-    const retryAfter = parseInt(res.headers.get('retry-after') ?? '15', 10);
-    const waitSec = Math.min(retryAfter + 5, 60);
-    log(`  [429] hal.${pageNumber} — tunggu ${waitSec}s... (retry ${4 - retries}/3)`);
-    await new Promise(r => setTimeout(r, waitSec * 1000));
-    return extractPage(pageText, pageNumber, retries - 1, true);
+  let raw = '{}';
+  try {
+    const response = await genai.models.generateContent({
+      model: AI_MODEL,
+      contents: prompt,
+      config: { temperature: 0.1, maxOutputTokens: 1024 },
+    });
+    raw = response.text ?? '{}';
+  } catch (e) {
+    const status = e.status ?? e.code ?? 0;
+    if (status === 429) {
+      if (retries <= 0) { log(`  [skip] hal.${pageNumber} — rate limit, lewati.`); return { assets: [], rateLimited: true }; }
+      const waitSec = Math.min((e.retryAfter ?? 15) + 5, 60);
+      log(`  [429] hal.${pageNumber} — tunggu ${waitSec}s... (retry ${4 - retries}/3)`);
+      await new Promise(r => setTimeout(r, waitSec * 1000));
+      return extractPage(pageText, pageNumber, retries - 1, true);
+    }
+    throw new Error(`Gemini ${status}: ${e.message}`);
   }
-  if (!res.ok) throw new Error(`Gemini ${res.status}: ${await res.text().catch(() => '')}`);
-
-  const data = await res.json();
-  const raw  = data.candidates?.[0]?.content?.parts?.[0]?.text ?? '{}';
 
   let parsed = {};
   try { const m = raw.match(/\{[\s\S]*\}/); parsed = m ? JSON.parse(m[0]) : {}; } catch { return { assets: [], rateLimited: _hadRateLimit }; }
@@ -250,30 +250,17 @@ async function main() {
   // 0. Test konektivitas Gemini
   log('[0/4] Cek koneksi Gemini API...');
   try {
-    const testRes = await fetch(`${AI_API_URL}?key=${GEMINI_KEY}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: 'ping' }] }], generationConfig: { maxOutputTokens: 5 } }),
-    });
-    if (!testRes.ok) {
-      const errBody = await testRes.json().catch(() => ({}));
-      const msg = errBody?.error?.message ?? testRes.status;
-      if (testRes.status === 429) {
-        log(`  ✗ Gemini quota habis (429) — coba lagi nanti.`);
-        log(`  ${msg}`);
-      } else if (testRes.status === 404) {
-        log(`  ✗ Model '${AI_MODEL}' tidak ditemukan (404).`);
-        log(`  ${msg}`);
-      } else {
-        log(`  ✗ Gemini error ${testRes.status}: ${msg}`);
-      }
-      setTimeout(() => process.exit(1), 100);
-      return;
-    }
+    await genai.models.generateContent({ model: AI_MODEL, contents: 'ping', config: { maxOutputTokens: 5 } });
     log(`  ✓ Gemini OK (${AI_MODEL})\n`);
   } catch (e) {
-    log(`  ✗ Tidak bisa connect ke Gemini: ${e.message}`);
-    process.exit(1);
+    const status = e.status ?? e.code ?? 0;
+    if (status === 429) {
+      log(`  ✗ Gemini quota habis (429) — coba lagi nanti.`);
+    } else {
+      log(`  ✗ Gemini error ${status}: ${e.message}`);
+    }
+    setTimeout(() => process.exit(1), 100);
+    return;
   }
 
   // 1. Baca file
