@@ -107,7 +107,7 @@ if (!GEMINI_KEY) { console.error('Error: GEMINI_API_KEY tidak ada di .env.local'
 if (!CLI_AUTH)   { console.error('Error: AUTH_SECRET tidak ada di .env.local'); process.exit(1); }
 
 // ── Config ───────────────────────────────────────────────────────────────────
-const AI_MODEL           = 'gemini-2.5-flash';
+const AI_MODEL           = 'gemini-flash-latest';
 const CHUNK_SIZE         = 200;
 const MAX_GROQ_PER_CHUNK = 20;
 const PAGE_TEXT_LIMIT    = 2000;
