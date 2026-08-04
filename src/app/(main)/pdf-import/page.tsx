@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useRef, useCallback } from 'react';
-import { FileText, FileJson, CheckCircle, XCircle, ChevronRight, RotateCcw, ExternalLink, AlertTriangle, Trash2 } from 'lucide-react';
+import { ImageIcon, FileJson, CheckCircle, XCircle, ChevronRight, RotateCcw, ExternalLink, AlertTriangle, Trash2, X } from 'lucide-react';
 import Link from 'next/link';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
@@ -12,14 +12,12 @@ import type { PDFExtractedAsset } from '@/types/pdf';
 import { AssetLabel, ASSET_LABEL_LABELS, ALL_ASSET_LABELS } from '@/domain/value-objects/AssetLabel';
 
 // ── Types ──────────────────────────────────────────────────────────
-interface PDFPreviewData {
-  fileName: string;
+interface ImagePreviewData {
+  fileNames: string[];
   bankName: string;
-  totalPages: number;
-  relevantPages: number;
+  totalImages: number;
   assets: PDFExtractedAsset[];
   warnings: string[];
-  method: string;
 }
 
 interface ConfirmResult {
@@ -34,22 +32,24 @@ interface ConfirmResult {
 }
 
 type Step = 'upload' | 'review' | 'done';
-type Mode = 'pdf' | 'json';
+type Mode = 'images' | 'json';
+
+const MAX_IMAGE_FILES = 10;
 
 const STEPS: { key: Step; label: string }[] = [
   { key: 'upload', label: 'Upload' },
   { key: 'review', label: 'Review Asset' },
-  { key: 'done', label: 'Hasil Import' },
+  { key: 'done',   label: 'Hasil Import' },
 ];
 
 const ASSET_TYPES = ['RUMAH', 'LAHAN', 'RUKO', 'GUDANG', 'PABRIK', 'APARTEMEN', 'KANTOR', 'HOTEL', 'OTHER'];
 
 function clientConfidence(item: Partial<PDFExtractedAsset>): 'HIGH' | 'MEDIUM' | 'LOW' {
   let s = 0;
-  if (item.city   && String(item.city).length > 2)     s++;
+  if (item.city    && String(item.city).length > 2)     s++;
   if (item.address && String(item.address).length > 10) s++;
-  if (Number(item.marketValue) > 0)                    s++;
-  if (item.assetType && item.assetType !== 'OTHER')    s++;
+  if (Number(item.marketValue) > 0)                     s++;
+  if (item.assetType && item.assetType !== 'OTHER')     s++;
   if (Number(item.landArea) > 0 || Number(item.buildingArea) > 0) s++;
   return s >= 4 ? 'HIGH' as const : s >= 2 ? 'MEDIUM' as const : 'LOW' as const;
 }
@@ -62,9 +62,9 @@ function StepBar({ current }: { current: Step }) {
       {STEPS.map((s, i) => (
         <div key={s.key} className="flex items-center">
           <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium ${
-            i < idx ? 'bg-emerald-100 text-emerald-700' :
+            i < idx   ? 'bg-emerald-100 text-emerald-700' :
             i === idx ? 'bg-blue-600 text-white' :
-            'bg-gray-100 text-gray-400'
+                        'bg-gray-100 text-gray-400'
           }`}>
             <span className="w-4 h-4 rounded-full flex items-center justify-center border text-[10px] font-bold border-current">
               {i + 1}
@@ -79,54 +79,74 @@ function StepBar({ current }: { current: Step }) {
 }
 
 function ConfidenceBadge({ confidence }: { confidence: string }) {
-  if (confidence === 'HIGH') return <Badge variant="success">Tinggi</Badge>;
+  if (confidence === 'HIGH')   return <Badge variant="success">Tinggi</Badge>;
   if (confidence === 'MEDIUM') return <Badge variant="warning">Sedang</Badge>;
   return <Badge variant="danger">Rendah</Badge>;
 }
 
 // ── Main component ─────────────────────────────────────────────────
 export default function PDFImportPage() {
-  const [step, setStep] = useState<Step>('upload');
-  const [mode, setMode] = useState<Mode>('json');
-  const [sourceType, setSourceType] = useState<'Bank' | 'Balai Lelang'>('Bank');
-  const [bankName, setBankName] = useState('');
-  const [labelAsset, setLabelAsset] = useState<AssetLabel>('LELANG');
-  const [file, setFile] = useState<File | null>(null);
-  const [jsonText, setJsonText] = useState('');
-  const [preview, setPreview] = useState<PDFPreviewData | null>(null);
-  const [assets, setAssets] = useState<PDFExtractedAsset[]>([]);
-  const [result, setResult] = useState<ConfirmResult | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const fileRef = useRef<HTMLInputElement>(null);
+  const [step, setStep]               = useState<Step>('upload');
+  const [mode, setMode]               = useState<Mode>('json');
+  const [sourceType, setSourceType]   = useState<'Bank' | 'Balai Lelang'>('Bank');
+  const [bankName, setBankName]       = useState('');
+  const [labelAsset, setLabelAsset]   = useState<AssetLabel>('LELANG');
+  const [files, setFiles]             = useState<File[]>([]);
+  const [imagePreviews, setImagePreviews] = useState<string[]>([]);
+  const [jsonText, setJsonText]       = useState('');
+  const [preview, setPreview]         = useState<ImagePreviewData | null>(null);
+  const [assets, setAssets]           = useState<PDFExtractedAsset[]>([]);
+  const [result, setResult]           = useState<ConfirmResult | null>(null);
+  const [loading, setLoading]         = useState(false);
+  const [error, setError]             = useState<string | null>(null);
+  const fileRef     = useRef<HTMLInputElement>(null);
   const jsonFileRef = useRef<HTMLInputElement>(null);
 
   const reset = useCallback(() => {
     setStep('upload');
     setBankName('');
     setLabelAsset('LELANG');
-    setFile(null);
+    setFiles([]);
+    setImagePreviews((prev) => { prev.forEach(URL.revokeObjectURL); return []; });
     setJsonText('');
     setPreview(null);
     setAssets([]);
     setResult(null);
     setError(null);
-    if (fileRef.current) fileRef.current.value = '';
+    if (fileRef.current)     fileRef.current.value = '';
     if (jsonFileRef.current) jsonFileRef.current.value = '';
   }, []);
 
-  // ── Mode: JSON — parse dan langsung ke review ──────────────────
+  function handleFilesChange(selected: FileList | null) {
+    if (!selected) return;
+    const arr     = Array.from(selected).filter((f) =>
+      ['image/jpeg', 'image/jpg', 'image/png'].includes(f.type.toLowerCase())
+    );
+    const limited = arr.slice(0, MAX_IMAGE_FILES);
+    // Revoke old object URLs
+    setImagePreviews((prev) => { prev.forEach(URL.revokeObjectURL); return []; });
+    setFiles(limited);
+    setImagePreviews(limited.map((f) => URL.createObjectURL(f)));
+    setError(null);
+  }
+
+  function removeFile(idx: number) {
+    setFiles((prev) => prev.filter((_, i) => i !== idx));
+    setImagePreviews((prev) => {
+      URL.revokeObjectURL(prev[idx]);
+      return prev.filter((_, i) => i !== idx);
+    });
+  }
+
+  // ── Mode: JSON ────────────────────────────────────────────────
   function handleJsonImport() {
     if (!bankName.trim()) { setError('Isi nama bank/source terlebih dahulu'); return; }
     if (!jsonText.trim()) { setError('Paste atau upload file JSON dari Gemini'); return; }
     setError(null);
     let parsed: { assets?: unknown[] };
-    try {
-      parsed = JSON.parse(jsonText);
-    } catch {
-      setError('JSON tidak valid. Pastikan format sesuai output Gemini.');
-      return;
-    }
+    try { parsed = JSON.parse(jsonText); }
+    catch { setError('JSON tidak valid. Pastikan format sesuai output Gemini.'); return; }
+
     const raw = Array.isArray(parsed) ? parsed : (Array.isArray(parsed?.assets) ? parsed.assets : null);
     if (!raw || raw.length === 0) {
       setError('Tidak ditemukan array assets dalam JSON. Pastikan formatnya { "assets": [...] }');
@@ -162,32 +182,31 @@ export default function PDFImportPage() {
     setStep('review');
   }
 
-  // ── Mode: PDF — upload & extract ──────────────────────────────
-  async function handleExtract() {
-    if (!file || !bankName.trim()) {
-      setError('Pilih file PDF dan isi nama source');
+  // ── Mode: Images — upload ke Gemini & ekstrak ─────────────────
+  async function handleExtractImages() {
+    if (files.length === 0 || !bankName.trim()) {
+      setError('Pilih gambar dan isi nama source');
       return;
     }
     setLoading(true);
     setError(null);
     try {
       const fd = new FormData();
-      fd.append('file', file);
+      files.forEach((f) => fd.append('files', f));
       fd.append('bankName', bankName.trim());
-      const res = await fetch('/api/import/pdf', { method: 'POST', body: fd });
+
+      const res  = await fetch('/api/import/images', { method: 'POST', body: fd });
       const text = await res.text();
       let json: Record<string, unknown>;
-      try {
-        json = JSON.parse(text);
-      } catch {
-        throw new Error(`Server error (HTTP ${res.status}) — gunakan Import JSON untuk PDF besar.`);
-      }
-      if (!res.ok || json.error) throw new Error((json.error as Record<string, unknown>)?.message as string ?? json.message as string ?? `Error ${res.status}`);
+      try { json = JSON.parse(text); }
+      catch { throw new Error(`Server error (HTTP ${res.status})`); }
+      if (!res.ok || json.error)
+        throw new Error((json.error as Record<string, unknown>)?.message as string ?? `Error ${res.status}`);
 
-      const data = json.data as PDFPreviewData;
+      const data = json.data as ImagePreviewData;
       setPreview(data);
       setAssets(labelAsset === 'CASSIE'
-        ? data.assets.map((a) => ({ ...a, limitPrice: (a.outstanding || 0) }))
+        ? data.assets.map((a) => ({ ...a, limitPrice: a.outstanding || 0 }))
         : data.assets);
       setStep('review');
     } catch (e: unknown) {
@@ -216,9 +235,9 @@ export default function PDFImportPage() {
     setError(null);
     try {
       const res = await fetch('/api/import/pdf/confirm', {
-        method: 'POST',
+        method:  'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ bankName: preview?.bankName ?? bankName.trim(), assets, labelAsset }),
+        body:    JSON.stringify({ bankName: preview?.bankName ?? bankName.trim(), assets, labelAsset }),
       });
       const json = await res.json();
       if (!res.ok || json.error) throw new Error(json.error?.message ?? json.message ?? `Error ${res.status}`);
@@ -235,7 +254,7 @@ export default function PDFImportPage() {
     <div className="p-6 max-w-6xl mx-auto">
       <div className="mb-6">
         <h2 className="text-xl font-semibold text-gray-900">Import Asset</h2>
-        <p className="text-sm text-gray-500 mt-1">Upload JSON dari Gemini AI Studio atau PDF langsung</p>
+        <p className="text-sm text-gray-500 mt-1">Upload JSON dari Gemini AI Studio atau gambar JPEG/PNG langsung</p>
       </div>
 
       <StepBar current={step} />
@@ -266,18 +285,19 @@ export default function PDFImportPage() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => { setMode('pdf'); setError(null); }}
+                  onClick={() => { setMode('images'); setError(null); }}
                   className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border-l border-gray-200 transition-colors ${
-                    mode === 'pdf' ? 'bg-blue-600 text-white' : 'bg-white text-gray-500 hover:bg-gray-50'
+                    mode === 'images' ? 'bg-blue-600 text-white' : 'bg-white text-gray-500 hover:bg-gray-50'
                   }`}
                 >
-                  <FileText className="w-3.5 h-3.5" /> Upload PDF
+                  <ImageIcon className="w-3.5 h-3.5" /> Upload Gambar
                 </button>
               </div>
             </div>
           </CardHeader>
+
           <CardContent className="space-y-5">
-            {/* Source name — shared */}
+            {/* Source — shared */}
             <div>
               <label className="text-xs font-medium text-gray-600 block mb-1.5">Source</label>
               <div className="flex mb-2">
@@ -325,7 +345,7 @@ export default function PDFImportPage() {
             {mode === 'json' && (
               <div className="space-y-3">
                 <div className="rounded-lg bg-blue-50 border border-blue-200 px-4 py-3 text-xs text-blue-700">
-                  Buka <strong>Google AI Studio</strong> → upload PDF → gunakan prompt ekstraksi → copy JSON hasilnya ke sini.
+                  Buka <strong>Google AI Studio</strong> → upload PDF/gambar → gunakan prompt ekstraksi → copy JSON hasilnya ke sini.
                 </div>
 
                 <div>
@@ -365,9 +385,7 @@ export default function PDFImportPage() {
                     onChange={(e) => setJsonText(e.target.value)}
                   />
                   {jsonText.trim() && (
-                    <p className="text-xs text-gray-400 mt-1">
-                      {jsonText.length.toLocaleString()} karakter diinput
-                    </p>
+                    <p className="text-xs text-gray-400 mt-1">{jsonText.length.toLocaleString()} karakter</p>
                   )}
                 </div>
 
@@ -379,42 +397,85 @@ export default function PDFImportPage() {
               </div>
             )}
 
-            {/* ── PDF mode ── */}
-            {mode === 'pdf' && (
-              <div className="space-y-3">
-                <div>
-                  <label className="text-xs font-medium text-gray-600 block mb-1">File PDF</label>
-                  <div
-                    className="border-2 border-dashed border-gray-300 rounded-xl p-8 text-center cursor-pointer hover:border-blue-400 hover:bg-blue-50/40 transition-colors"
-                    onClick={() => fileRef.current?.click()}
-                  >
-                    <FileText className="w-8 h-8 text-gray-400 mx-auto mb-2" />
-                    {file ? (
-                      <p className="text-sm font-medium text-blue-700">{file.name}</p>
-                    ) : (
-                      <>
-                        <p className="text-sm font-medium text-gray-700">Klik untuk pilih file</p>
-                        <p className="text-xs text-gray-400 mt-1">.pdf — maks. 20MB</p>
-                      </>
-                    )}
+            {/* ── Images mode ── */}
+            {mode === 'images' && (
+              <div className="space-y-4">
+                <div className="rounded-lg bg-blue-50 border border-blue-200 px-4 py-3 text-xs text-blue-700">
+                  Upload foto dokumen properti — Gemini Vision mengekstrak data aset dari setiap gambar.
+                  Maks. <strong>10 file</strong> JPEG/PNG, maks. <strong>10MB</strong> per file.
+                </div>
+
+                {/* Drop zone */}
+                <div
+                  className="border-2 border-dashed border-gray-300 rounded-xl p-6 text-center cursor-pointer hover:border-blue-400 hover:bg-blue-50/40 transition-colors"
+                  onClick={() => fileRef.current?.click()}
+                  onDragOver={(e) => e.preventDefault()}
+                  onDrop={(e) => { e.preventDefault(); handleFilesChange(e.dataTransfer.files); }}
+                >
+                  <ImageIcon className="w-8 h-8 text-gray-400 mx-auto mb-2" />
+                  {files.length === 0 ? (
+                    <>
+                      <p className="text-sm font-medium text-gray-700">Klik atau drag & drop gambar ke sini</p>
+                      <p className="text-xs text-gray-400 mt-1">JPEG, PNG — maks. {MAX_IMAGE_FILES} file sekaligus</p>
+                    </>
+                  ) : (
+                    <p className="text-sm font-medium text-blue-700">
+                      {files.length} gambar dipilih — klik untuk tambah/ganti
+                    </p>
+                  )}
+                </div>
+                <input
+                  ref={fileRef}
+                  type="file"
+                  accept="image/jpeg,image/jpg,image/png"
+                  multiple
+                  className="hidden"
+                  onChange={(e) => handleFilesChange(e.target.files)}
+                />
+
+                {/* Thumbnail grid */}
+                {imagePreviews.length > 0 && (
+                  <div className="grid grid-cols-5 gap-2">
+                    {imagePreviews.map((src, idx) => (
+                      <div key={idx} className="relative group aspect-square">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={src}
+                          alt={files[idx]?.name}
+                          className="w-full h-full object-cover rounded-lg border border-gray-200"
+                        />
+                        <button
+                          type="button"
+                          onClick={(e) => { e.stopPropagation(); removeFile(idx); }}
+                          className="absolute top-1 right-1 w-5 h-5 rounded-full bg-red-500 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity shadow"
+                          title="Hapus gambar"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                        <p className="absolute bottom-0 left-0 right-0 text-[9px] text-white bg-black/50 rounded-b-lg px-1 py-0.5 truncate">
+                          {files[idx]?.name}
+                        </p>
+                      </div>
+                    ))}
                   </div>
-                  <input
-                    ref={fileRef}
-                    type="file"
-                    accept=".pdf"
-                    className="hidden"
-                    onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-                  />
-                </div>
+                )}
 
-                <div className="rounded-lg bg-amber-50 border border-amber-200 px-4 py-3 text-xs text-amber-700">
-                  Untuk PDF besar (&gt;10MB atau &gt;50 halaman), gunakan mode <strong>Import JSON</strong> untuk hasil lebih akurat.
-                </div>
-
-                <div className="flex justify-end pt-2">
-                  <Button onClick={handleExtract} loading={loading} disabled={!file || !bankName.trim()}>
-                    Ekstrak Asset dari PDF
-                  </Button>
+                <div className="flex items-center justify-between pt-1">
+                  {files.length > 0 && (
+                    <p className="text-xs text-gray-500">
+                      {files.length}/{MAX_IMAGE_FILES} gambar ·{' '}
+                      {(files.reduce((s, f) => s + f.size, 0) / 1024 / 1024).toFixed(1)} MB total
+                    </p>
+                  )}
+                  <div className="ml-auto">
+                    <Button
+                      onClick={handleExtractImages}
+                      loading={loading}
+                      disabled={files.length === 0 || !bankName.trim()}
+                    >
+                      Ekstrak Asset dari Gambar{files.length > 0 ? ` (${files.length})` : ''}
+                    </Button>
+                  </div>
                 </div>
               </div>
             )}
@@ -429,13 +490,13 @@ export default function PDFImportPage() {
             <CardContent className="py-4">
               <div className="flex flex-wrap gap-4 items-center justify-between">
                 <div className="flex gap-6">
-                  {preview && <StatItem label="Total Halaman" value={preview.totalPages} />}
-                  {preview && <StatItem label="Halaman Relevan" value={preview.relevantPages} />}
+                  {preview && <StatItem label="Gambar Diproses" value={preview.totalImages} />}
                   <StatItem label="Asset Ditemukan" value={assets.length} />
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                   <Badge variant="info">{preview?.bankName ?? bankName}</Badge>
                   <Badge variant="default">Label: {ASSET_LABEL_LABELS[labelAsset]}</Badge>
+                  {preview  && <Badge variant="info">{preview.totalImages} gambar</Badge>}
                   {!preview && <Badge variant="success">JSON</Badge>}
                 </div>
               </div>
@@ -500,11 +561,11 @@ export default function PDFImportPage() {
                               {ASSET_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
                             </select>
                           </td>
-                          <EditCell value={asset.city} onChange={(v) => updateAsset(idx, 'city', v)} />
-                          <EditCell value={asset.district} onChange={(v) => updateAsset(idx, 'district', v)} />
-                          <EditCell value={asset.address} onChange={(v) => updateAsset(idx, 'address', v)} wide />
-                          <EditCell value={String(asset.marketValue)} onChange={(v) => updateAsset(idx, 'marketValue', Number(v))} align="right" />
-                          <EditCell value={String(asset.outstanding)} onChange={(v) => updateAsset(idx, 'outstanding', Number(v))} align="right" />
+                          <EditCell value={asset.city}        onChange={(v) => updateAsset(idx, 'city', v)} />
+                          <EditCell value={asset.district}    onChange={(v) => updateAsset(idx, 'district', v)} />
+                          <EditCell value={asset.address}     onChange={(v) => updateAsset(idx, 'address', v)} wide />
+                          <EditCell value={String(asset.marketValue)}  onChange={(v) => updateAsset(idx, 'marketValue', Number(v))}  align="right" />
+                          <EditCell value={String(asset.outstanding)}  onChange={(v) => updateAsset(idx, 'outstanding', Number(v))}  align="right" />
                           {labelAsset === 'CASSIE' ? (
                             <td className="px-3 py-2 text-right text-gray-500">
                               {Math.round(asset.limitPrice ?? 0).toLocaleString('id-ID')}
@@ -512,9 +573,9 @@ export default function PDFImportPage() {
                           ) : (
                             <EditCell value={String(asset.limitPrice ?? 0)} onChange={(v) => updateAsset(idx, 'limitPrice', Number(v))} align="right" />
                           )}
-                          <EditCell value={String(asset.landArea)} onChange={(v) => updateAsset(idx, 'landArea', Number(v))} align="right" />
+                          <EditCell value={String(asset.landArea)}     onChange={(v) => updateAsset(idx, 'landArea', Number(v))}     align="right" />
                           <EditCell value={String(asset.buildingArea)} onChange={(v) => updateAsset(idx, 'buildingArea', Number(v))} align="right" />
-                          <EditCell value={asset.debtorName} onChange={(v) => updateAsset(idx, 'debtorName', v)} />
+                          <EditCell value={asset.debtorName}  onChange={(v) => updateAsset(idx, 'debtorName', v)} />
                           <td className="px-3 py-2 text-center">
                             <ConfidenceBadge confidence={asset.confidence} />
                           </td>
@@ -554,11 +615,11 @@ export default function PDFImportPage() {
             </CardHeader>
             <CardContent className="space-y-5">
               <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-                <StatBox label="Total Asset" value={result.totalAssets} color="gray" />
-                <StatBox label="Disimpan" value={result.savedCount} color="emerald" />
-                <StatBox label="Ditolak (Geo)" value={result.rejected} color="amber" />
-                <StatBox label="Gagal Simpan" value={result.failedCount} color="red" />
-                <StatBox label="Area Dianalisis AI" value={result.areaResearched ?? 0} color="blue" />
+                <StatBox label="Total Asset"      value={result.totalAssets}        color="gray" />
+                <StatBox label="Disimpan"         value={result.savedCount}         color="emerald" />
+                <StatBox label="Ditolak (Geo)"    value={result.rejected}           color="amber" />
+                <StatBox label="Gagal Simpan"     value={result.failedCount}        color="red" />
+                <StatBox label="Area Dianalisis"  value={result.areaResearched ?? 0} color="blue" />
               </div>
 
               {result.savedCount > 0 && (
@@ -620,9 +681,9 @@ export default function PDFImportPage() {
 }
 
 // ── Sub-components ─────────────────────────────────────────────────
-function EditCell({
-  value, onChange, align, wide,
-}: { value: string; onChange: (v: string) => void; align?: 'right'; wide?: boolean }) {
+function EditCell({ value, onChange, align, wide }: {
+  value: string; onChange: (v: string) => void; align?: 'right'; wide?: boolean;
+}) {
   return (
     <td className={`px-3 py-2 ${align === 'right' ? 'text-right' : ''} ${wide ? 'min-w-[200px]' : ''}`}>
       <input
@@ -644,13 +705,15 @@ function StatItem({ label, value }: { label: string; value: number }) {
   );
 }
 
-function StatBox({ label, value, color }: { label: string; value: number; color: 'blue' | 'emerald' | 'amber' | 'red' | 'gray' }) {
+function StatBox({ label, value, color }: {
+  label: string; value: number; color: 'blue' | 'emerald' | 'amber' | 'red' | 'gray';
+}) {
   const colors = {
-    blue: 'bg-blue-50 text-blue-700',
+    blue:    'bg-blue-50 text-blue-700',
     emerald: 'bg-emerald-50 text-emerald-700',
-    amber: 'bg-amber-50 text-amber-700',
-    red: 'bg-red-50 text-red-700',
-    gray: 'bg-gray-50 text-gray-700',
+    amber:   'bg-amber-50 text-amber-700',
+    red:     'bg-red-50 text-red-700',
+    gray:    'bg-gray-50 text-gray-700',
   };
   return (
     <div className={`rounded-xl p-4 ${colors[color]}`}>
