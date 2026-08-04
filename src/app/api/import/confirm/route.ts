@@ -36,8 +36,8 @@ export async function POST(req: NextRequest) {
     if (!bankName || !Array.isArray(allRows) || !mapping) {
       return err('VALIDATION_ERROR', 'bankName, allRows, dan mapping wajib diisi');
     }
-    if (labelAsset !== 'CASSIE' && labelAsset !== 'LELANG') {
-      return err('VALIDATION_ERROR', 'Label Asset wajib dipilih (Cassie/Lelang)');
+    if (labelAsset !== 'CASSIE' && labelAsset !== 'LELANG' && labelAsset !== 'AYDA') {
+      return err('VALIDATION_ERROR', 'Label Asset wajib dipilih (Cassie/Lelang/AYDA)');
     }
     if (allRows.length === 0) return err('VALIDATION_ERROR', 'File tidak memiliki data');
     if (allRows.length > 2000) return err('VALIDATION_ERROR', 'Maksimal 2000 baris per import');
@@ -85,7 +85,7 @@ export async function POST(req: NextRequest) {
       }
 
       // Label Asset menentukan Harga Limit:
-      // Cassie -> Harga Outstanding; Lelang -> Harga Limit dari kolom termapping (Harga Lelang)
+      // Cassie -> Harga Outstanding; Lelang/AYDA -> Harga Limit dari kolom termapping
       const limitPrice = labelAsset === 'CASSIE'
         ? (asset.outstanding ?? 0)
         : (asset.limitPrice ?? 0);

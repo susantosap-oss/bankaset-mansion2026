@@ -36,8 +36,8 @@ export async function POST(req: NextRequest) {
     if (!bankName) return err('VALIDATION_ERROR', 'bankName wajib diisi');
     if (!Array.isArray(assets) || assets.length === 0) return err('VALIDATION_ERROR', 'Tidak ada asset untuk disimpan');
     if (assets.length > 500) return err('VALIDATION_ERROR', 'Maksimal 500 asset per konfirmasi');
-    if (labelAsset !== 'CASSIE' && labelAsset !== 'LELANG') {
-      return err('VALIDATION_ERROR', 'Label Asset wajib dipilih (Cassie/Lelang)');
+    if (labelAsset !== 'CASSIE' && labelAsset !== 'LELANG' && labelAsset !== 'AYDA') {
+      return err('VALIDATION_ERROR', 'Label Asset wajib dipilih (Cassie/Lelang/AYDA)');
     }
 
     const geoService = getGeographicFilterService();
@@ -70,15 +70,16 @@ export async function POST(req: NextRequest) {
       }
 
       // Label Asset menentukan Harga Limit:
-      // Cassie -> Harga Outstanding; Lelang -> Harga Limit hasil ekstraksi (Harga Lelang)
+      // Cassie -> Harga Outstanding
+      // Lelang/AYDA -> Harga Limit hasil ekstraksi (Harga Lelang / Nilai Jual AYDA)
       const limitPrice = labelAsset === 'CASSIE'
         ? (a.outstanding || 0)
         : (a.limitPrice ?? 0);
 
       // Ratio per label:
-      // Cassie  -> Sisa Hutang Pokok / Outstanding
-      // Lelang  -> Limit Price / Market Value (diskon dari pasar)
-      const liquidationRatio = labelAsset === 'LELANG'
+      // Cassie       -> Sisa Hutang Pokok / Outstanding
+      // Lelang/AYDA  -> Limit Price / Market Value (diskon dari pasar)
+      const liquidationRatio = (labelAsset === 'LELANG' || labelAsset === 'AYDA')
         ? (a.limitPrice && a.marketValue ? Math.round((a.limitPrice / a.marketValue) * 100) / 100 : undefined)
         : (a.liquidationRatio || undefined);
 

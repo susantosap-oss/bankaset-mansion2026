@@ -103,15 +103,17 @@ if "!BANK_NAME!"=="" (
 
 echo.
 echo Label Asset:
-echo   1  LELANG  (Harga Limit = dari dokumen)
+echo   1  LELANG  (Harga Limit = dari dokumen - Harga Lelang)
 echo   2  CASSIE  (Harga Limit = Outstanding)
+echo   3  AYDA    (Harga Limit = dari dokumen - Nilai Jual AYDA)
 echo.
 
 :pilih_label
-set /p "LABEL_CHOICE=Pilih 1 atau 2 : "
+set /p "LABEL_CHOICE=Pilih 1, 2, atau 3 : "
 if "!LABEL_CHOICE!"=="1" ( set "LABEL=LELANG" & goto mulai )
 if "!LABEL_CHOICE!"=="2" ( set "LABEL=CASSIE" & goto mulai )
-echo Pilihan tidak valid, ketik 1 atau 2.
+if "!LABEL_CHOICE!"=="3" ( set "LABEL=AYDA"   & goto mulai )
+echo Pilihan tidak valid, ketik 1, 2, atau 3.
 goto pilih_label
 
 :mulai

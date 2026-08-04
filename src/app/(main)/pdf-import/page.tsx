@@ -313,7 +313,11 @@ export default function PDFImportPage() {
                 ))}
               </Select>
               <p className="text-xs text-gray-400 mt-1">
-                {labelAsset === 'CASSIE' ? 'Harga Limit = Outstanding' : 'Harga Limit = dari dokumen (Harga Lelang)'}
+                {labelAsset === 'CASSIE'
+                  ? 'Harga Limit = Outstanding'
+                  : labelAsset === 'AYDA'
+                    ? 'Harga Limit = dari dokumen (Nilai Jual AYDA)'
+                    : 'Harga Limit = dari dokumen (Harga Lelang)'}
               </p>
             </div>
 

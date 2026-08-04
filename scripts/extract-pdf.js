@@ -49,12 +49,12 @@ if (isPdfPath) {
 }
 
 if (!bankName || !labelAsset) {
-  console.log('\nUsage (pilih file):  node scripts/extract-pdf.js <bankName> <LELANG|CASSIE>');
-  console.log('Usage (path langsung): node scripts/extract-pdf.js <pdf-path> <bankName> <LELANG|CASSIE>\n');
+  console.log('\nUsage (pilih file):  node scripts/extract-pdf.js <bankName> <LELANG|CASSIE|AYDA>');
+  console.log('Usage (path langsung): node scripts/extract-pdf.js <pdf-path> <bankName> <LELANG|CASSIE|AYDA>\n');
   process.exit(1);
 }
-if (!['LELANG', 'CASSIE'].includes(labelAsset)) {
-  console.error('Error: labelAsset harus LELANG atau CASSIE'); process.exit(1);
+if (!['LELANG', 'CASSIE', 'AYDA'].includes(labelAsset)) {
+  console.error('Error: labelAsset harus LELANG, CASSIE, atau AYDA'); process.exit(1);
 }
 
 // ── Pilih PDF dari folder ────────────────────────────────────────────────────
@@ -185,7 +185,7 @@ function mapAsset(item) {
     debtorName:           String(item.debtorName ?? ''),
     principalOutstanding: Number(item.principalOutstanding ?? 0),
     liquidationRatio: (() => {
-      if (labelAsset === 'LELANG') {
+      if (labelAsset === 'LELANG' || labelAsset === 'AYDA') {
         const mv = Number(item.marketValue ?? 0);
         const lp = Number(item.limitPrice ?? 0);
         return mv > 0 && lp > 0 ? Math.round((lp / mv) * 100) / 100 : 0;

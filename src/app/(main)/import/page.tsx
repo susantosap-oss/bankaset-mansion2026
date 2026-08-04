@@ -237,7 +237,9 @@ export default function ImportPage() {
               <p className="text-xs text-gray-400 mt-1">
                 {labelAsset === 'CASSIE'
                   ? 'Harga Limit = Harga Outstanding'
-                  : 'Harga Limit = Harga Lelang (dari kolom termapping)'}
+                  : labelAsset === 'AYDA'
+                    ? 'Harga Limit = Nilai Jual AYDA (dari kolom termapping)'
+                    : 'Harga Limit = Harga Lelang (dari kolom termapping)'}
               </p>
             </div>
 
@@ -438,7 +440,9 @@ export default function ImportPage() {
               <div className="rounded-lg bg-blue-50 border border-blue-200 px-4 py-3 text-xs text-blue-700">
                 Label Asset: <strong>{ASSET_LABEL_LABELS[labelAsset]}</strong> · {labelAsset === 'CASSIE'
                   ? 'Harga Limit akan dihitung otomatis = Harga Outstanding.'
-                  : 'Harga Limit akan diambil dari kolom yang dipetakan ke "Harga Limit" (Harga Lelang).'}
+                  : labelAsset === 'AYDA'
+                    ? 'Harga Limit akan diambil dari kolom yang dipetakan ke "Harga Limit" (Nilai Jual AYDA).'
+                    : 'Harga Limit akan diambil dari kolom yang dipetakan ke "Harga Limit" (Harga Lelang).'}
               </div>
             </CardContent>
           </Card>
