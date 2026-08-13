@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useRef, useCallback } from 'react';
-import { Upload, CheckCircle, XCircle, ChevronRight, RotateCcw, ExternalLink } from 'lucide-react';
+import { Upload, CheckCircle, XCircle, ChevronRight, RotateCcw, ExternalLink, RefreshCw, Info } from 'lucide-react';
 import Link from 'next/link';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
@@ -31,12 +31,24 @@ interface PreviewData {
   suggestions: ColumnResolution[];
 }
 
+interface SyncStats {
+  unchanged: number;
+  updated: number;
+  disabled: number;
+  added: number;
+  addFailed: number;
+}
+
 interface ConfirmResult {
+  mode: 'append' | 'sync';
   totalRows: number;
   accepted: number;
   rejected: number;
-  savedCount: number;
-  failedCount: number;
+  // append mode
+  savedCount?: number;
+  failedCount?: number;
+  // sync mode
+  sync?: SyncStats;
   areaResearched: number;
   rejectedDetails: Array<{ row: number; city: string; assetType: string; reason: string }>;
   saveErrors: Array<{ row: number; reason: string }>;
@@ -89,6 +101,11 @@ export default function ImportPage() {
   const [result, setResult] = useState<ConfirmResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Sync mode
+  const [syncMode, setSyncMode] = useState(false);
+  // Cassie disc
+  const [cassieDiscEnabled, setCassieDiscEnabled] = useState(false);
+  const [cassieDiscPct, setCassieDiscPct] = useState(50);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const reset = useCallback(() => {
@@ -102,6 +119,9 @@ export default function ImportPage() {
     setSaveMappingForBank(false);
     setResult(null);
     setError(null);
+    setSyncMode(false);
+    setCassieDiscEnabled(false);
+    setCassieDiscPct(50);
     if (fileRef.current) fileRef.current.value = '';
   }, []);
 
@@ -124,7 +144,6 @@ export default function ImportPage() {
       const data: PreviewData = json.data;
       setPreview(data);
 
-      // Initialize mapping from suggestions
       const initMapping: Record<string, string> = {};
       for (const s of data.suggestions) {
         initMapping[s.sourceColumn] = s.suggestedField ?? 'ignore';
@@ -153,6 +172,8 @@ export default function ImportPage() {
           mapping,
           saveMappingForBank,
           labelAsset,
+          syncMode,
+          cassieDiscPct: labelAsset === 'CASSIE' && cassieDiscEnabled ? cassieDiscPct : undefined,
         }),
       });
       const json = await res.json();
@@ -243,6 +264,90 @@ export default function ImportPage() {
               </p>
             </div>
 
+            {/* Cassie Disc — hanya muncul jika label CASSIE */}
+            {labelAsset === 'CASSIE' && (
+              <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 space-y-3">
+                <div className="flex items-start gap-2">
+                  <Info className="w-4 h-4 text-amber-600 mt-0.5 flex-shrink-0" />
+                  <p className="text-xs text-amber-700 font-medium">Normalisasi Baki Debet (Cassie)</p>
+                </div>
+                <div className="flex items-center gap-3">
+                  <input
+                    type="checkbox"
+                    id="cassieDisc"
+                    checked={cassieDiscEnabled}
+                    onChange={(e) => setCassieDiscEnabled(e.target.checked)}
+                    className="rounded border-gray-300 text-amber-600"
+                  />
+                  <label htmlFor="cassieDisc" className="text-sm text-gray-700">
+                    Hitung Baki Debet otomatis jika tidak ada di file
+                  </label>
+                </div>
+                {cassieDiscEnabled && (
+                  <div className="pl-7 space-y-1">
+                    <label className="text-xs font-medium text-gray-600 block">
+                      Baki Debet = Outstanding × <span className="text-amber-700 font-semibold">{cassieDiscPct}%</span>
+                    </label>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="range"
+                        min={1}
+                        max={100}
+                        value={cassieDiscPct}
+                        onChange={(e) => setCassieDiscPct(Number(e.target.value))}
+                        className="w-40 accent-amber-500"
+                      />
+                      <div className="flex items-center gap-1">
+                        <input
+                          type="number"
+                          min={1}
+                          max={100}
+                          value={cassieDiscPct}
+                          onChange={(e) => setCassieDiscPct(Math.min(100, Math.max(1, Number(e.target.value))))}
+                          className="w-16 rounded-lg border border-gray-300 bg-white px-2 py-1 text-sm text-center"
+                        />
+                        <span className="text-sm text-gray-500">%</span>
+                      </div>
+                    </div>
+                    <p className="text-xs text-gray-500">
+                      Rasio Sisa Pokok/Outstanding akan dihitung = {cassieDiscPct}%.
+                      Hanya diterapkan pada baris yang tidak memiliki nilai Baki Debet.
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Sync Mode */}
+            <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 space-y-2">
+              <div className="flex items-center gap-3">
+                <input
+                  type="checkbox"
+                  id="syncMode"
+                  checked={syncMode}
+                  onChange={(e) => setSyncMode(e.target.checked)}
+                  className="rounded border-gray-300 text-blue-600"
+                />
+                <label htmlFor="syncMode" className="text-sm font-medium text-gray-700 flex items-center gap-1.5">
+                  <RefreshCw className="w-3.5 h-3.5 text-blue-600" />
+                  Mode Sinkronisasi (Update dari Bank yang Sudah Ada)
+                </label>
+              </div>
+              {syncMode && (
+                <div className="pl-7 text-xs text-blue-700 space-y-1">
+                  <p>• Data sama → diabaikan (skip)</p>
+                  <p>• Data berubah → diperbarui otomatis</p>
+                  <p>• Data lama tidak ada di file baru → dinonaktifkan (dianggap SOLD)</p>
+                  <p>• Data baru yang belum ada → ditambahkan</p>
+                </div>
+              )}
+              {!syncMode && (
+                <p className="pl-7 text-xs text-gray-500">
+                  Nonaktif: file akan di-append (semua baris ditambah sebagai aset baru).
+                </p>
+              )}
+            </div>
+
             <div>
               <label className="text-xs font-medium text-gray-600 block mb-1">File Excel / CSV</label>
               <div
@@ -292,6 +397,7 @@ export default function ImportPage() {
                 <div className="flex items-center gap-2">
                   <Badge variant="info">{preview.bankName}</Badge>
                   <Badge variant="default">Label: {ASSET_LABEL_LABELS[labelAsset]}</Badge>
+                  {syncMode && <Badge variant="warning">Sync Mode</Badge>}
                 </div>
               </div>
             </CardHeader>
@@ -385,6 +491,25 @@ export default function ImportPage() {
                 />
               </div>
 
+              {/* Sync mode info */}
+              {syncMode && (
+                <div className="rounded-lg bg-blue-50 border border-blue-200 px-4 py-3 text-xs text-blue-700 space-y-1">
+                  <p className="font-medium flex items-center gap-1.5">
+                    <RefreshCw className="w-3.5 h-3.5" />
+                    Mode Sinkronisasi aktif untuk <strong>{preview.bankName}</strong>
+                  </p>
+                  <p>Aset lama yang tidak ada di file ini akan dinonaktifkan (SOLD). Aset yang berubah akan diperbarui.</p>
+                </div>
+              )}
+
+              {/* Cassie disc info */}
+              {labelAsset === 'CASSIE' && cassieDiscEnabled && (
+                <div className="rounded-lg bg-amber-50 border border-amber-200 px-4 py-3 text-xs text-amber-700">
+                  <p className="font-medium">Normalisasi Baki Debet aktif: {cassieDiscPct}% dari Outstanding</p>
+                  <p className="mt-0.5">Baris tanpa data Baki Debet akan dihitung otomatis = Outstanding × {cassieDiscPct}%.</p>
+                </div>
+              )}
+
               {/* Mapped field summary */}
               <div>
                 <p className="text-xs font-medium text-gray-500 mb-2">Field yang akan diimport:</p>
@@ -450,7 +575,7 @@ export default function ImportPage() {
           <div className="flex justify-between">
             <Button variant="secondary" onClick={() => setStep('map')}>Kembali</Button>
             <Button onClick={handleConfirm} loading={loading}>
-              Mulai Import {preview.totalRows} Baris
+              {syncMode ? `Sinkronisasi ${preview.totalRows} Baris` : `Mulai Import ${preview.totalRows} Baris`}
             </Button>
           </div>
         </div>
@@ -461,24 +586,68 @@ export default function ImportPage() {
         <div className="space-y-4">
           <Card>
             <CardHeader>
-              <h3 className="font-semibold text-gray-800">Hasil Import</h3>
+              <h3 className="font-semibold text-gray-800">
+                {result.mode === 'sync' ? 'Hasil Sinkronisasi' : 'Hasil Import'}
+              </h3>
             </CardHeader>
             <CardContent className="space-y-5">
-              <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-                <StatBox label="Total Baris" value={result.totalRows} color="gray" />
-                <StatBox label="Asset Disimpan" value={result.savedCount} color="emerald" />
-                <StatBox label="Ditolak (Geo)" value={result.rejected} color="amber" />
-                <StatBox label="Gagal Simpan" value={result.failedCount} color="red" />
-                <StatBox label="Area Dianalisis AI" value={result.areaResearched ?? 0} color="blue" />
-              </div>
+              {result.mode === 'sync' && result.sync ? (
+                <>
+                  <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+                    <StatBox label="Total Baris File" value={result.totalRows} color="gray" />
+                    <StatBox label="Tidak Berubah" value={result.sync.unchanged} color="gray" />
+                    <StatBox label="Diperbarui" value={result.sync.updated} color="blue" />
+                    <StatBox label="Dinonaktifkan" value={result.sync.disabled} color="amber" />
+                    <StatBox label="Ditambah Baru" value={result.sync.added} color="emerald" />
+                  </div>
 
-              {result.savedCount > 0 && (
-                <div className="flex items-center gap-2 rounded-lg bg-emerald-50 border border-emerald-200 px-4 py-3 text-sm text-emerald-700">
-                  <CheckCircle className="w-5 h-5 flex-shrink-0" />
-                  <span><strong>{result.savedCount} asset</strong> berhasil disimpan ke Asset Engine.
-                  {(result.areaResearched ?? 0) > 0 && <> · <strong>{result.areaResearched} area baru</strong> otomatis dianalisis AI dan ditambahkan ke Market Intelligence.</>}
-                  </span>
-                </div>
+                  {result.sync.disabled > 0 && (
+                    <div className="rounded-lg bg-amber-50 border border-amber-200 px-4 py-3 text-sm text-amber-700">
+                      <strong>{result.sync.disabled} aset</strong> tidak ditemukan di file baru dan telah dinonaktifkan (status SOLD) — dianggap sudah terjual atau dihapus dari daftar bank.
+                    </div>
+                  )}
+
+                  {result.sync.added > 0 && (
+                    <div className="flex items-center gap-2 rounded-lg bg-emerald-50 border border-emerald-200 px-4 py-3 text-sm text-emerald-700">
+                      <CheckCircle className="w-5 h-5 flex-shrink-0" />
+                      <span>
+                        <strong>{result.sync.added} aset baru</strong> ditambahkan.
+                        {(result.areaResearched ?? 0) > 0 && <> · <strong>{result.areaResearched} area baru</strong> dianalisis AI.</>}
+                      </span>
+                    </div>
+                  )}
+
+                  {result.sync.updated > 0 && (
+                    <div className="rounded-lg bg-blue-50 border border-blue-200 px-4 py-3 text-sm text-blue-700">
+                      <strong>{result.sync.updated} aset</strong> diperbarui karena ada perbedaan data dari file baru.
+                    </div>
+                  )}
+
+                  {result.sync.unchanged > 0 && (
+                    <div className="rounded-lg bg-gray-50 border border-gray-200 px-4 py-3 text-sm text-gray-600">
+                      <strong>{result.sync.unchanged} aset</strong> tidak berubah — dilewati.
+                    </div>
+                  )}
+                </>
+              ) : (
+                <>
+                  <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+                    <StatBox label="Total Baris" value={result.totalRows} color="gray" />
+                    <StatBox label="Asset Disimpan" value={result.savedCount ?? 0} color="emerald" />
+                    <StatBox label="Ditolak (Geo)" value={result.rejected} color="amber" />
+                    <StatBox label="Gagal Simpan" value={result.failedCount ?? 0} color="red" />
+                    <StatBox label="Area Dianalisis AI" value={result.areaResearched ?? 0} color="blue" />
+                  </div>
+
+                  {(result.savedCount ?? 0) > 0 && (
+                    <div className="flex items-center gap-2 rounded-lg bg-emerald-50 border border-emerald-200 px-4 py-3 text-sm text-emerald-700">
+                      <CheckCircle className="w-5 h-5 flex-shrink-0" />
+                      <span><strong>{result.savedCount} asset</strong> berhasil disimpan ke Asset Engine.
+                      {(result.areaResearched ?? 0) > 0 && <> · <strong>{result.areaResearched} area baru</strong> otomatis dianalisis AI dan ditambahkan ke Market Intelligence.</>}
+                      </span>
+                    </div>
+                  )}
+                </>
               )}
 
               {result.rejectedDetails.length > 0 && (

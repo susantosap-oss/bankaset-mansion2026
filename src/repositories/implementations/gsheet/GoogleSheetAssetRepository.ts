@@ -253,6 +253,56 @@ export class GoogleSheetAssetRepository implements IAssetRepository {
     return [...new Set(all.map((a) => a.bankName).filter(Boolean))].sort();
   }
 
+  async findActiveByBank(bankName: string): Promise<Asset[]> {
+    const all = await this.getAllRows();
+    return all.filter((a) => a.bankName === bankName && a.status === 'ACTIVE');
+  }
+
+  async bulkDisable(assetIds: string[]): Promise<number> {
+    if (assetIds.length === 0) return 0;
+    const rows = await this.client.readSheet(this.spreadsheetId, SHEET_NAME);
+    const dataRows = rows.slice(1);
+    const idSet = new Set(assetIds);
+    const now = new Date().toISOString();
+
+    const batchUpdates: Array<{ rowIndex: number; values: unknown[] }> = [];
+    for (let i = 0; i < dataRows.length; i++) {
+      if (!idSet.has(dataRows[i][0])) continue;
+      const existing = rowToAsset(dataRows[i]);
+      if (!existing || existing.status === 'SOLD') continue;
+      batchUpdates.push({ rowIndex: i + 1, values: assetToRow({ ...existing, status: 'SOLD', updatedAt: now }) });
+    }
+
+    if (batchUpdates.length > 0) {
+      await this.client.batchUpdateRows(this.spreadsheetId, SHEET_NAME, batchUpdates);
+      this.client.invalidateCache(this.spreadsheetId, SHEET_NAME);
+    }
+    return batchUpdates.length;
+  }
+
+  async bulkUpdateFields(updates: Array<{ assetId: string; partial: Partial<CreateAssetInput> }>): Promise<number> {
+    if (updates.length === 0) return 0;
+    const rows = await this.client.readSheet(this.spreadsheetId, SHEET_NAME);
+    const dataRows = rows.slice(1);
+    const byId = new Map(updates.map((u) => [u.assetId, u.partial]));
+    const now = new Date().toISOString();
+
+    const batchUpdates: Array<{ rowIndex: number; values: unknown[] }> = [];
+    for (let i = 0; i < dataRows.length; i++) {
+      const partial = byId.get(dataRows[i][0]);
+      if (!partial) continue;
+      const existing = rowToAsset(dataRows[i]);
+      if (!existing) continue;
+      batchUpdates.push({ rowIndex: i + 1, values: assetToRow({ ...existing, ...partial, updatedAt: now }) });
+    }
+
+    if (batchUpdates.length > 0) {
+      await this.client.batchUpdateRows(this.spreadsheetId, SHEET_NAME, batchUpdates);
+      this.client.invalidateCache(this.spreadsheetId, SHEET_NAME);
+    }
+    return batchUpdates.length;
+  }
+
   /**
    * Tulis semua sellable assets (sudah difilter + diurutkan) ke sheet tab SSoT.
    * Sheet dibuat otomatis jika belum ada. Isi lama di-clear dulu.

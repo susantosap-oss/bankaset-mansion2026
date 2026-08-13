@@ -10,6 +10,7 @@ import { CanonicalField } from '@/domain/entities/BankMapping';
 import { CreateAssetInput } from '@/domain/entities/Asset';
 import { AssetLabel } from '@/domain/value-objects/AssetLabel';
 import { autoResearchNewAreas } from '@/lib/autoResearchAreas';
+import { diffAssets } from '@/lib/assetFingerprint';
 
 export const maxDuration = 60;
 
@@ -29,9 +30,17 @@ export async function POST(req: NextRequest) {
       mapping: Record<string, string>;
       saveMappingForBank?: boolean;
       labelAsset?: AssetLabel;
+      /** Jika true: bandingkan dengan data lama → update/disable/tambah. */
+      syncMode?: boolean;
+      /**
+       * Khusus CASSIE: jika baki debet (principalOutstanding) tidak ada di file,
+       * hitung otomatis = outstanding × (cassieDiscPct / 100).
+       * Contoh: cassieDiscPct=50 → principalOutstanding = outstanding × 50%.
+       */
+      cassieDiscPct?: number;
     };
 
-    const { bankName, allRows, mapping, saveMappingForBank, labelAsset } = body;
+    const { bankName, allRows, mapping, saveMappingForBank, labelAsset, syncMode, cassieDiscPct } = body;
 
     if (!bankName || !Array.isArray(allRows) || !mapping) {
       return err('VALIDATION_ERROR', 'bankName, allRows, dan mapping wajib diisi');
@@ -53,7 +62,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    const toSave: CreateAssetInput[] = [];
+    const toProcess: CreateAssetInput[] = [];
     const rejected: Array<{ row: number; city: string; assetType: string; reason: string }> = [];
 
     for (let i = 0; i < allRows.length; i++) {
@@ -62,7 +71,6 @@ export async function POST(req: NextRequest) {
 
       const { asset } = normService.normalizeRow(rawRow, resolvedMapping);
 
-      // If city not mapped, try to extract from full address
       if (!asset.city?.trim() && asset.address?.trim()) {
         const extracted = geoService.extractFromAddress(asset.address);
         if (extracted.city) asset.city = extracted.city;
@@ -85,12 +93,30 @@ export async function POST(req: NextRequest) {
       }
 
       // Label Asset menentukan Harga Limit:
-      // Cassie -> Harga Outstanding; Lelang/AYDA -> Harga Limit dari kolom termapping
+      // Cassie → Harga Outstanding; Lelang/AYDA → Harga Limit dari kolom termapping
       const limitPrice = labelAsset === 'CASSIE'
         ? (asset.outstanding ?? 0)
         : (asset.limitPrice ?? 0);
 
-      toSave.push({
+      // ── Cassie Disc: hitung principalOutstanding jika tidak ada di file ──
+      let principalOutstanding = asset.principalOutstanding;
+      let liquidationRatio = asset.liquidationRatio;
+
+      if (
+        labelAsset === 'CASSIE' &&
+        cassieDiscPct != null &&
+        cassieDiscPct > 0 &&
+        cassieDiscPct <= 100 &&
+        (!principalOutstanding || principalOutstanding === 0)
+      ) {
+        const outstanding = asset.outstanding ?? 0;
+        principalOutstanding = outstanding * (cassieDiscPct / 100);
+        if (!liquidationRatio && outstanding > 0) {
+          liquidationRatio = cassieDiscPct; // ratio = principalOutstanding/outstanding × 100
+        }
+      }
+
+      toProcess.push({
         bankName: asset.bankName?.trim() || bankName,
         assetType: asset.assetType || 'OTHER',
         city: geoResult.normalizedCity || city,
@@ -104,26 +130,104 @@ export async function POST(req: NextRequest) {
         status: 'ACTIVE',
         rawRowRef: JSON.stringify(rawRow).slice(0, 300),
         debtorName: asset.debtorName,
-        principalOutstanding: asset.principalOutstanding,
-        liquidationRatio: asset.liquidationRatio,
+        principalOutstanding,
+        liquidationRatio,
         liquidationValue: asset.liquidationValue,
         limitPrice,
         labelAsset,
       });
     }
 
+    // ── Sync Mode: bandingkan dengan data lama ────────────────────────
+    if (syncMode) {
+      const existing = await assetRepo.findActiveByBank(bankName);
+      const diff = diffAssets(existing, toProcess);
+
+      // 1. Disable aset yang tidak ada di file baru (dianggap SOLD)
+      const disabledCount = await assetRepo.bulkDisable(diff.toDisable.map((a) => a.assetId));
+
+      // 2. Update aset yang ada tapi berubah
+      const updateInputs = diff.changed.map(({ existing: ex, incoming: inc }) => ({
+        assetId: ex.assetId,
+        partial: {
+          assetType: inc.assetType,
+          city: inc.city,
+          district: inc.district,
+          area: inc.area,
+          address: inc.address,
+          marketValue: inc.marketValue,
+          outstanding: inc.outstanding,
+          landArea: inc.landArea,
+          buildingArea: inc.buildingArea,
+          debtorName: inc.debtorName,
+          principalOutstanding: inc.principalOutstanding,
+          liquidationRatio: inc.liquidationRatio,
+          liquidationValue: inc.liquidationValue,
+          limitPrice: inc.limitPrice,
+          rawRowRef: inc.rawRowRef,
+        } satisfies Partial<CreateAssetInput>,
+      }));
+      const updatedCount = await assetRepo.bulkUpdateFields(updateInputs);
+
+      // 3. Tambah aset baru
+      let savedCount = 0;
+      let failedCount = 0;
+      let saveErrors: Array<{ row: number; reason: string }> = [];
+      if (diff.toAdd.length > 0) {
+        const result = await assetRepo.bulkSave(diff.toAdd);
+        savedCount = result.saved;
+        failedCount = result.failed;
+        saveErrors = result.errors;
+      }
+
+      const areaResearched = await autoResearchNewAreas(diff.toAdd).catch(() => 0);
+
+      if (saveMappingForBank && Object.keys(resolvedMapping).length > 0) {
+        try {
+          const fields: Partial<Record<CanonicalField, string>> = {};
+          for (const [col, canonical] of Object.entries(resolvedMapping)) {
+            fields[canonical] = col;
+          }
+          await getBankMappingRepository().save({
+            bankName,
+            fields,
+            active: true,
+            updatedBy: session!.user?.email ?? 'system',
+          });
+        } catch { /* Non-fatal */ }
+      }
+
+      return ok({
+        mode: 'sync',
+        totalRows: allRows.length,
+        accepted: toProcess.length,
+        rejected: rejected.length,
+        sync: {
+          unchanged: diff.unchanged.length,
+          updated: updatedCount,
+          disabled: disabledCount,
+          added: savedCount,
+          addFailed: failedCount,
+        },
+        areaResearched,
+        rejectedDetails: rejected.slice(0, 50),
+        saveErrors: saveErrors.slice(0, 10),
+      });
+    }
+
+    // ── Normal Mode (append saja, tidak ada diff) ─────────────────────
     let savedCount = 0;
     let failedCount = 0;
     let saveErrors: Array<{ row: number; reason: string }> = [];
 
-    if (toSave.length > 0) {
-      const result = await assetRepo.bulkSave(toSave);
+    if (toProcess.length > 0) {
+      const result = await assetRepo.bulkSave(toProcess);
       savedCount = result.saved;
       failedCount = result.failed;
       saveErrors = result.errors;
     }
 
-    const areaResearched = await autoResearchNewAreas(toSave).catch(() => 0);
+    const areaResearched = await autoResearchNewAreas(toProcess).catch(() => 0);
 
     if (saveMappingForBank && Object.keys(resolvedMapping).length > 0) {
       try {
@@ -137,14 +241,13 @@ export async function POST(req: NextRequest) {
           active: true,
           updatedBy: session!.user?.email ?? 'system',
         });
-      } catch {
-        // Non-fatal
-      }
+      } catch { /* Non-fatal */ }
     }
 
     return ok({
+      mode: 'append',
       totalRows: allRows.length,
-      accepted: toSave.length,
+      accepted: toProcess.length,
       rejected: rejected.length,
       savedCount,
       failedCount,

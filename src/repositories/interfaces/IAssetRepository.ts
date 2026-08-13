@@ -3,6 +3,13 @@ import { Grade } from '@/domain/value-objects/Grade';
 import { AssetType } from '@/domain/value-objects/AssetType';
 import { AssetStatus } from '@/domain/value-objects/AssetStatus';
 
+export interface BulkUpdateResult {
+  updated: number;
+  disabled: number;
+  added: number;
+  errors: Array<{ row: number; reason: string }>;
+}
+
 export interface AssetFilter {
   bankName?: string;
   city?: string;
@@ -56,4 +63,10 @@ export interface IAssetRepository {
   findDistinctCities(): Promise<string[]>;
   findDistinctAreas(city?: string): Promise<string[]>;
   findDistinctBanks(): Promise<string[]>;
+  /** Ambil semua aset ACTIVE milik satu bank (untuk sync import). */
+  findActiveByBank(bankName: string): Promise<Asset[]>;
+  /** Tandai aset sebagai SOLD (dianggap dihapus dari list bank). */
+  bulkDisable(assetIds: string[]): Promise<number>;
+  /** Update field-field tertentu pada banyak aset sekaligus. */
+  bulkUpdateFields(updates: Array<{ assetId: string; partial: Partial<CreateAssetInput> }>): Promise<number>;
 }
