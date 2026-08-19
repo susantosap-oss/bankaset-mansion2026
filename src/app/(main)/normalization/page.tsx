@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Plus, Trash2, BookOpen, MapPin, CheckCircle, XCircle } from 'lucide-react';
+import { Plus, Trash2, BookOpen, MapPin, CheckCircle, XCircle, Copy } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
@@ -14,6 +14,11 @@ interface BackfillResult {
   scanned: number;
   candidates: number;
   updated: number;
+}
+
+interface DedupPreview {
+  duplicateGroups: number;
+  totalDuplicates: number;
 }
 
 export default function NormalizationPage() {
@@ -29,6 +34,12 @@ export default function NormalizationPage() {
   const [backfillResult, setBackfillResult] = useState<BackfillResult | null>(null);
   const [backfillError, setBackfillError] = useState<string | null>(null);
 
+  const [dedupPreview, setDedupPreview] = useState<DedupPreview | null>(null);
+  const [dedupChecking, setDedupChecking] = useState(false);
+  const [dedupRemoving, setDedupRemoving] = useState(false);
+  const [dedupRemoved, setDedupRemoved] = useState<number | null>(null);
+  const [dedupError, setDedupError] = useState<string | null>(null);
+
   async function handleBackfillCities() {
     if (!confirm('Normalisasi kota untuk semua asset yang belum memiliki data Kota?\n\nProses ini membaca kolom Alamat Lengkap dan mengisi Kota/Kecamatan secara otomatis.')) return;
     setBackfilling(true);
@@ -43,6 +54,40 @@ export default function NormalizationPage() {
       setBackfillError(e instanceof Error ? e.message : 'Gagal normalisasi');
     } finally {
       setBackfilling(false);
+    }
+  }
+
+  async function handleDedupCheck() {
+    setDedupChecking(true);
+    setDedupPreview(null);
+    setDedupRemoved(null);
+    setDedupError(null);
+    try {
+      const res = await fetch('/api/admin/dedup');
+      const json = await res.json();
+      if (!res.ok || json.error) throw new Error(json.error?.message ?? `Error ${res.status}`);
+      setDedupPreview({ duplicateGroups: json.data.duplicateGroups, totalDuplicates: json.data.totalDuplicates });
+    } catch (e) {
+      setDedupError(e instanceof Error ? e.message : 'Gagal cek duplikat');
+    } finally {
+      setDedupChecking(false);
+    }
+  }
+
+  async function handleDedupRemove() {
+    if (!confirm(`Hapus ${dedupPreview?.totalDuplicates} data kembar?\n\nData yang lebih lama akan dipertahankan, sisanya dinonaktifkan.`)) return;
+    setDedupRemoving(true);
+    setDedupError(null);
+    try {
+      const res = await fetch('/api/admin/dedup', { method: 'POST' });
+      const json = await res.json();
+      if (!res.ok || json.error) throw new Error(json.error?.message ?? `Error ${res.status}`);
+      setDedupRemoved(json.data.removed);
+      setDedupPreview(null);
+    } catch (e) {
+      setDedupError(e instanceof Error ? e.message : 'Gagal hapus duplikat');
+    } finally {
+      setDedupRemoving(false);
     }
   }
 
@@ -156,6 +201,67 @@ export default function NormalizationPage() {
                   {backfillResult.updated === 0 && backfillResult.candidates === 0 && ' Semua asset sudah memiliki data Kota.'}
                 </span>
               </div>
+            )}
+          </CardContent>
+        )}
+      </Card>
+
+      {/* ── Hapus data kembar ───────────────────────────────────── */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between flex-wrap gap-3">
+            <div>
+              <h3 className="font-semibold text-gray-800 flex items-center gap-2">
+                <Copy className="w-4 h-4 text-red-500" />
+                Hapus Data Kembar
+              </h3>
+              <p className="text-xs text-gray-500 mt-0.5">
+                Deteksi dan nonaktifkan aset duplikat berdasarkan bank + nama debitur + alamat.
+                Data yang lebih lama dipertahankan, sisanya dinonaktifkan.
+              </p>
+            </div>
+            <div className="flex gap-2">
+              <Button variant="secondary" onClick={handleDedupCheck} loading={dedupChecking}>
+                <Copy className="w-4 h-4" />
+                Cek Duplikat
+              </Button>
+              {dedupPreview && dedupPreview.totalDuplicates > 0 && (
+                <Button variant="danger" onClick={handleDedupRemove} loading={dedupRemoving}>
+                  <Trash2 className="w-4 h-4" />
+                  Hapus {dedupPreview.totalDuplicates} Data
+                </Button>
+              )}
+            </div>
+          </div>
+        </CardHeader>
+
+        {(dedupPreview !== null || dedupRemoved !== null || dedupError) && (
+          <CardContent className="pt-0">
+            {dedupError && (
+              <div className="flex items-center gap-2 text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-4 py-3">
+                <XCircle className="w-4 h-4 shrink-0" />
+                {dedupError}
+              </div>
+            )}
+            {dedupRemoved !== null && (
+              <div className="flex items-center gap-2 text-sm text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-4 py-3">
+                <CheckCircle className="w-4 h-4 shrink-0" />
+                Selesai — <strong>{dedupRemoved}</strong> data kembar berhasil dinonaktifkan.
+              </div>
+            )}
+            {dedupPreview !== null && dedupRemoved === null && (
+              dedupPreview.totalDuplicates === 0 ? (
+                <div className="flex items-center gap-2 text-sm text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-4 py-3">
+                  <CheckCircle className="w-4 h-4 shrink-0" />
+                  Tidak ada data kembar ditemukan.
+                </div>
+              ) : (
+                <div className="flex items-center gap-2 text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-4 py-3">
+                  <Copy className="w-4 h-4 shrink-0" />
+                  Ditemukan <strong>{dedupPreview.totalDuplicates}</strong> data kembar
+                  dalam <strong>{dedupPreview.duplicateGroups}</strong> grup. Klik &quot;Hapus&quot; untuk membersihkan.
+                </div>
+              )
             )}
           </CardContent>
         )}
