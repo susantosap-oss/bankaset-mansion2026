@@ -172,6 +172,30 @@ export class GoogleSheetClient {
     this.cache.invalidate(`read:${spreadsheetId}:${sheetName}`);
   }
 
+  /** Hapus baris-baris tertentu dari sheet secara fisik menggunakan deleteDimension.
+   *  rowIndices adalah 0-based index di sheet (baris header = 0, data pertama = 1).
+   *  Proses dari bawah ke atas agar index tidak bergeser. */
+  async deleteSheetRows(spreadsheetId: string, sheetName: string, rowIndices: number[]): Promise<void> {
+    if (rowIndices.length === 0) return;
+    await this.init();
+
+    const meta = await this.sheets.spreadsheets.get({ spreadsheetId });
+    const sheet = meta.data.sheets?.find((s) => s.properties?.title === sheetName);
+    if (!sheet?.properties?.sheetId == null) throw new Error(`Sheet "${sheetName}" not found`);
+    const sheetId = sheet!.properties!.sheetId!;
+
+    // Delete dari bawah ke atas agar row index tidak bergeser
+    const sorted = [...rowIndices].sort((a, b) => b - a);
+    const requests = sorted.map((rowIndex) => ({
+      deleteDimension: {
+        range: { sheetId, dimension: 'ROWS', startIndex: rowIndex, endIndex: rowIndex + 1 },
+      },
+    }));
+
+    await this.sheets.spreadsheets.batchUpdate({ spreadsheetId, requestBody: { requests } });
+    this.cache.invalidate(`read:${spreadsheetId}:${sheetName}`);
+  }
+
   invalidateCache(spreadsheetId: string, sheetName?: string): void {
     const prefix = sheetName ? `read:${spreadsheetId}:${sheetName}` : `read:${spreadsheetId}`;
     this.cache.invalidate(prefix);

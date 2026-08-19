@@ -283,15 +283,16 @@ export class GoogleSheetAssetRepository implements IAssetRepository {
   async bulkPurge(assetIds: string[]): Promise<number> {
     if (assetIds.length === 0) return 0;
     const rows = await this.client.readSheet(this.spreadsheetId, SHEET_NAME);
-    const header = rows[0];
     const idSet = new Set(assetIds);
-    let count = 0;
-    const kept = rows.slice(1).filter((row) => {
-      if (row[0] && idSet.has(row[0])) { count++; return false; }
-      return true;
-    });
-    await this.client.overwriteSheet(this.spreadsheetId, SHEET_NAME, [header, ...kept]);
-    return count;
+    // Cari row index (0-based, header = 0, data mulai dari 1)
+    const toDelete: number[] = [];
+    for (let i = 1; i < rows.length; i++) {
+      if (rows[i][0] && idSet.has(rows[i][0])) toDelete.push(i);
+    }
+    if (toDelete.length > 0) {
+      await this.client.deleteSheetRows(this.spreadsheetId, SHEET_NAME, toDelete);
+    }
+    return toDelete.length;
   }
 
   async bulkUpdateFields(updates: Array<{ assetId: string; partial: Partial<CreateAssetInput> }>): Promise<number> {
