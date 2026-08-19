@@ -40,6 +40,13 @@ export default function NormalizationPage() {
   const [dedupRemoved, setDedupRemoved] = useState<number | null>(null);
   const [dedupError, setDedupError] = useState<string | null>(null);
 
+  const [crmTotal, setCrmTotal]       = useState<number | null>(null);
+  const [crmDups, setCrmDups]         = useState<number | null>(null);
+  const [crmChecking, setCrmChecking] = useState(false);
+  const [crmRemoving, setCrmRemoving] = useState(false);
+  const [crmRemoved, setCrmRemoved]   = useState<number | null>(null);
+  const [crmError, setCrmError]       = useState<string | null>(null);
+
   async function handleBackfillCities() {
     if (!confirm('Normalisasi kota untuk semua asset yang belum memiliki data Kota?\n\nProses ini membaca kolom Alamat Lengkap dan mengisi Kota/Kecamatan secara otomatis.')) return;
     setBackfilling(true);
@@ -88,6 +95,43 @@ export default function NormalizationPage() {
       setDedupError(e instanceof Error ? e.message : 'Gagal hapus duplikat');
     } finally {
       setDedupRemoving(false);
+    }
+  }
+
+  async function handleCrmCheck() {
+    setCrmChecking(true);
+    setCrmDups(null);
+    setCrmTotal(null);
+    setCrmRemoved(null);
+    setCrmError(null);
+    try {
+      const res = await fetch('/api/admin/dedup-crm');
+      const json = await res.json();
+      if (!res.ok || json.error) throw new Error(json.error?.message ?? `Error ${res.status}`);
+      setCrmTotal(json.data.totalRows);
+      setCrmDups(json.data.duplicates);
+    } catch (e) {
+      setCrmError(e instanceof Error ? e.message : 'Gagal cek duplikat CRM');
+    } finally {
+      setCrmChecking(false);
+    }
+  }
+
+  async function handleCrmRemove() {
+    if (!confirm(`Hapus ${crmDups} baris duplikat dari sheet CRM?\n\nHanya baris identik yang dihapus, data asli tetap aman.`)) return;
+    setCrmRemoving(true);
+    setCrmError(null);
+    try {
+      const res = await fetch('/api/admin/dedup-crm', { method: 'POST' });
+      const json = await res.json();
+      if (!res.ok || json.error) throw new Error(json.error?.message ?? `Error ${res.status}`);
+      setCrmRemoved(json.data.removed);
+      setCrmDups(null);
+      setCrmTotal(null);
+    } catch (e) {
+      setCrmError(e instanceof Error ? e.message : 'Gagal hapus duplikat CRM');
+    } finally {
+      setCrmRemoving(false);
     }
   }
 
@@ -260,6 +304,66 @@ export default function NormalizationPage() {
                   <Copy className="w-4 h-4 shrink-0" />
                   Ditemukan <strong>{dedupPreview.totalDuplicates}</strong> data kembar
                   dalam <strong>{dedupPreview.duplicateGroups}</strong> grup. Klik &quot;Hapus&quot; untuk membersihkan.
+                </div>
+              )
+            )}
+          </CardContent>
+        )}
+      </Card>
+
+      {/* ── Hapus data kembar CRM ──────────────────────────────────── */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between flex-wrap gap-3">
+            <div>
+              <h3 className="font-semibold text-gray-800 flex items-center gap-2">
+                <Copy className="w-4 h-4 text-orange-500" />
+                Hapus Data Kembar CRM
+              </h3>
+              <p className="text-xs text-gray-500 mt-0.5">
+                Deteksi dan hapus baris identik di sheet <strong>Assets</strong> CRM.
+                Baris duplikat dihapus fisik, data asli tetap aman.
+              </p>
+            </div>
+            <div className="flex gap-2">
+              <Button variant="secondary" onClick={handleCrmCheck} loading={crmChecking}>
+                <Copy className="w-4 h-4" />
+                Cek Duplikat CRM
+              </Button>
+              {crmDups !== null && crmDups > 0 && (
+                <Button variant="danger" onClick={handleCrmRemove} loading={crmRemoving}>
+                  <Trash2 className="w-4 h-4" />
+                  Hapus {crmDups} Baris
+                </Button>
+              )}
+            </div>
+          </div>
+        </CardHeader>
+
+        {(crmDups !== null || crmRemoved !== null || crmError) && (
+          <CardContent className="pt-0">
+            {crmError && (
+              <div className="flex items-center gap-2 text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-4 py-3">
+                <XCircle className="w-4 h-4 shrink-0" />
+                {crmError}
+              </div>
+            )}
+            {crmRemoved !== null && (
+              <div className="flex items-center gap-2 text-sm text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-4 py-3">
+                <CheckCircle className="w-4 h-4 shrink-0" />
+                Selesai — <strong>{crmRemoved}</strong> baris duplikat berhasil dihapus dari CRM.
+              </div>
+            )}
+            {crmDups !== null && crmRemoved === null && (
+              crmDups === 0 ? (
+                <div className="flex items-center gap-2 text-sm text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-4 py-3">
+                  <CheckCircle className="w-4 h-4 shrink-0" />
+                  Tidak ada duplikat di CRM. Total {crmTotal} baris.
+                </div>
+              ) : (
+                <div className="flex items-center gap-2 text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-4 py-3">
+                  <Copy className="w-4 h-4 shrink-0" />
+                  Ditemukan <strong>{crmDups}</strong> baris duplikat dari total <strong>{crmTotal}</strong> baris. Klik &quot;Hapus&quot; untuk membersihkan.
                 </div>
               )
             )}
