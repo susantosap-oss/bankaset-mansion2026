@@ -118,7 +118,7 @@ export default function NormalizationPage() {
   }
 
   async function handleCrmRemove() {
-    if (!confirm(`Hapus ${crmDups} baris duplikat dari sheet CRM?\n\nHanya baris identik yang dihapus, data asli tetap aman.`)) return;
+    if (!confirm(`Proses ${crmDups} duplikat di CRM?\n\n• Data lama dipertahankan\n• Harga & Status diupdate dari data terbaru\n• Status Terjual → Tampilkan di Web = FALSE\n• Baris duplikat dihapus fisik`)) return;
     setCrmRemoving(true);
     setCrmError(null);
     try {
@@ -128,6 +128,8 @@ export default function NormalizationPage() {
       setCrmRemoved(json.data.removed);
       setCrmDups(null);
       setCrmTotal(null);
+      // tampilkan pesan sukses dari server
+      if (json.data.message) setCrmError(null);
     } catch (e) {
       setCrmError(e instanceof Error ? e.message : 'Gagal hapus duplikat CRM');
     } finally {
