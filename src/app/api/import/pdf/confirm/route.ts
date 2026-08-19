@@ -82,7 +82,7 @@ export async function POST(req: NextRequest) {
       // Cassie       -> Sisa Hutang Pokok / Outstanding
       // Lelang/AYDA  -> Limit Price / Market Value (diskon dari pasar)
       const liquidationRatio = (labelAsset === 'LELANG' || labelAsset === 'AYDA')
-        ? (a.limitPrice && a.marketValue ? Math.round((a.limitPrice / a.marketValue) * 100) / 100 : undefined)
+        ? (a.limitPrice && a.marketValue ? Math.round((a.limitPrice / a.marketValue) * 100) : undefined)
         : (a.liquidationRatio || undefined);
 
       toSave.push({
