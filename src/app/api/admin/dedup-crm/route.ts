@@ -46,8 +46,10 @@ export async function GET(req: NextRequest) {
   try {
     const { rows, toDelete } = await findCRMDuplicates();
     return ok({
-      totalRows: rows.length - 1, // exclude header
+      totalRows: rows.length - 1,
       duplicates: toDelete.length,
+      headers: rows[0] ?? [],
+      sampleRow: rows[1] ?? [],
     });
   } catch (e) {
     console.error('[GET /api/admin/dedup-crm]', e);
