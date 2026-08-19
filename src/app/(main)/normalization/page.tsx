@@ -47,11 +47,12 @@ export default function NormalizationPage() {
   const [crmRemoved, setCrmRemoved]   = useState<number | null>(null);
   const [crmError, setCrmError]       = useState<string | null>(null);
 
-  const [syncNew, setSyncNew]         = useState<number | null>(null);
+  const [syncNew, setSyncNew]           = useState<number | null>(null);
   const [syncChecking, setSyncChecking] = useState(false);
-  const [syncRunning, setSyncRunning] = useState(false);
-  const [syncAdded, setSyncAdded]     = useState<number | null>(null);
-  const [syncError, setSyncError]     = useState<string | null>(null);
+  const [syncRunning, setSyncRunning]   = useState(false);
+  const [syncAdded, setSyncAdded]       = useState<number | null>(null);
+  const [syncError, setSyncError]       = useState<string | null>(null);
+  const [syncDate, setSyncDate]         = useState(() => new Date().toISOString().slice(0, 10));
 
   async function handleBackfillCities() {
     if (!confirm('Normalisasi kota untuk semua asset yang belum memiliki data Kota?\n\nProses ini membaca kolom Alamat Lengkap dan mengisi Kota/Kecamatan secara otomatis.')) return;
@@ -149,7 +150,8 @@ export default function NormalizationPage() {
     setSyncAdded(null);
     setSyncError(null);
     try {
-      const res = await fetch('/api/admin/sync-crm');
+      const params = syncDate ? `?createdAfter=${syncDate}T00:00:00.000Z` : '';
+      const res = await fetch(`/api/admin/sync-crm${params}`);
       const json = await res.json();
       if (!res.ok || json.error) throw new Error(json.error?.message ?? `Error ${res.status}`);
       setSyncNew(json.data.newAssets);
@@ -161,11 +163,15 @@ export default function NormalizationPage() {
   }
 
   async function handleSyncRun() {
-    if (!confirm(`Tambahkan ${syncNew} aset baru ke CRM?\n\nProses ini hanya menambah aset yang belum ada di CRM. Data yang sudah ada tidak diubah.`)) return;
+    if (!confirm(`Tambahkan ${syncNew} aset baru ke CRM?\n\nHanya aset dibuat sejak ${syncDate} yang belum ada di CRM.`)) return;
     setSyncRunning(true);
     setSyncError(null);
     try {
-      const res = await fetch('/api/admin/sync-crm', { method: 'POST' });
+      const res = await fetch('/api/admin/sync-crm', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ createdAfter: syncDate ? `${syncDate}T00:00:00.000Z` : undefined }),
+      });
       const json = await res.json();
       if (!res.ok || json.error) throw new Error(json.error?.message ?? `Error ${res.status}`);
       setSyncAdded(json.data.added);
@@ -363,10 +369,19 @@ export default function NormalizationPage() {
                 Sync Aset Baru ke CRM
               </h3>
               <p className="text-xs text-gray-500 mt-0.5">
-                Tambahkan aset yang belum ada di CRM. Data yang sudah ada tidak diubah.
+                Tambahkan aset yang belum ada di CRM, mulai tanggal yang dipilih. Data yang sudah ada tidak diubah.
               </p>
             </div>
-            <div className="flex gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs text-gray-500 whitespace-nowrap">Dari tanggal</span>
+                <input
+                  type="date"
+                  value={syncDate}
+                  onChange={(e) => { setSyncDate(e.target.value); setSyncNew(null); }}
+                  className="text-sm border border-gray-300 rounded-md px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
               <Button variant="secondary" onClick={handleSyncCheck} loading={syncChecking}>
                 <RefreshCw className="w-4 h-4" />
                 Cek Aset Baru

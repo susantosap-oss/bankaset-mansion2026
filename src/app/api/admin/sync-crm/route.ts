@@ -164,7 +164,7 @@ function buildCRMRow(asset: Asset, kodeAsset: string, now: string): string[] {
 
 // ── API ────────────────────────────────────────────────────────────────────
 
-async function findNewAssets() {
+async function findNewAssets(createdAfter?: string) {
   const sheetId = process.env.CRM_SHEET_ID;
   if (!sheetId) throw new Error('CRM_SHEET_ID tidak dikonfigurasi');
 
@@ -183,9 +183,17 @@ async function findNewAssets() {
   const existingCodes = crmRows.slice(1).map((r) => r[1] ?? '').filter(Boolean);
 
   // Aset baru = ada di Asset Bank, belum ada di CRM
-  const newAssets = assetResult.data.filter((a) => !existingIds.has(a.assetId));
+  let newAssets = assetResult.data.filter((a) => !existingIds.has(a.assetId));
 
-  return { newAssets, existingCodes, sheetId, client };
+  // Filter by createdAfter jika ada
+  if (createdAfter) {
+    newAssets = newAssets.filter((a) => a.createdAt >= createdAfter);
+  }
+
+  // Urutkan terbaru dulu
+  newAssets.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+
+  return { newAssets, existingCodes, sheetId, client, totalNew: newAssets.length };
 }
 
 export async function GET(req: NextRequest) {
@@ -197,9 +205,11 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const { newAssets } = await findNewAssets();
+    const createdAfter = req.nextUrl.searchParams.get('createdAfter') ?? undefined;
+    const { newAssets } = await findNewAssets(createdAfter);
     return ok({
       newAssets: newAssets.length,
+      createdAfter: createdAfter ?? null,
       preview: newAssets.slice(0, 5).map((a) => ({
         assetId: a.assetId,
         bank: a.bankName,
@@ -222,7 +232,8 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const { newAssets, existingCodes, sheetId, client } = await findNewAssets();
+    const body = await req.json().catch(() => ({})) as { createdAfter?: string };
+    const { newAssets, existingCodes, sheetId, client } = await findNewAssets(body.createdAfter);
     if (newAssets.length === 0) return ok({ added: 0, message: 'Semua aset sudah tersinkron.' });
 
     const now  = new Date().toISOString();
