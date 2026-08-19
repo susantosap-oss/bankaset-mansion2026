@@ -4,7 +4,7 @@ import { getGeographicFilterService, getAssetRepository } from '@/lib/container'
 import type { PDFExtractedAsset } from '@/types/pdf';
 import { CreateAssetInput } from '@/domain/entities/Asset';
 import { AssetLabel } from '@/domain/value-objects/AssetLabel';
-import { normalizeAssetType } from '@/domain/value-objects/AssetType';
+import { normalizeAssetType, COMMERCIAL_ASSET_TYPES } from '@/domain/value-objects/AssetType';
 import { autoResearchNewAreas } from '@/lib/autoResearchAreas';
 
 export const maxDuration = 60;
@@ -29,9 +29,10 @@ export async function POST(req: NextRequest) {
       bankName: string;
       assets: PDFExtractedAsset[];
       labelAsset?: AssetLabel;
+      bypassGeoFilter?: boolean;
     };
 
-    const { bankName, assets, labelAsset } = body;
+    const { bankName, assets, labelAsset, bypassGeoFilter } = body;
 
     if (!bankName) return err('VALIDATION_ERROR', 'bankName wajib diisi');
     if (!Array.isArray(assets) || assets.length === 0) return err('VALIDATION_ERROR', 'Tidak ada asset untuk disimpan');
@@ -58,8 +59,9 @@ export async function POST(req: NextRequest) {
       }
 
       const geoResult = geoService.filter(a.city, a.assetType);
+      const isCommercial = COMMERCIAL_ASSET_TYPES.includes(normalizeAssetType(a.assetType));
 
-      if (!geoResult.accepted) {
+      if (!geoResult.accepted && !(bypassGeoFilter && isCommercial)) {
         rejected.push({
           index: i + 1,
           city: a.city,

@@ -94,6 +94,7 @@ export default function PDFImportPage() {
   const [files, setFiles]             = useState<File[]>([]);
   const [imagePreviews, setImagePreviews] = useState<string[]>([]);
   const [jsonText, setJsonText]       = useState('');
+  const [bypassGeoFilter, setBypassGeoFilter] = useState(false);
   const [preview, setPreview]         = useState<ImagePreviewData | null>(null);
   const [assets, setAssets]           = useState<PDFExtractedAsset[]>([]);
   const [result, setResult]           = useState<ConfirmResult | null>(null);
@@ -106,6 +107,7 @@ export default function PDFImportPage() {
     setStep('upload');
     setBankName('');
     setLabelAsset('LELANG');
+    setBypassGeoFilter(false);
     setFiles([]);
     setImagePreviews((prev) => { prev.forEach(URL.revokeObjectURL); return []; });
     setJsonText('');
@@ -237,7 +239,7 @@ export default function PDFImportPage() {
       const res = await fetch('/api/import/pdf/confirm', {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ bankName: preview?.bankName ?? bankName.trim(), assets, labelAsset }),
+        body:    JSON.stringify({ bankName: preview?.bankName ?? bankName.trim(), assets, labelAsset, bypassGeoFilter }),
       });
       const json = await res.json();
       if (!res.ok || json.error) throw new Error(json.error?.message ?? json.message ?? `Error ${res.status}`);
@@ -339,6 +341,25 @@ export default function PDFImportPage() {
                     ? 'Harga Limit = dari dokumen (Nilai Jual AYDA)'
                     : 'Harga Limit = dari dokumen (Harga Lelang)'}
               </p>
+            </div>
+
+            {/* Bypass geo filter — khusus Hotel & Villa */}
+            <div className="flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3">
+              <input
+                id="bypassGeo"
+                type="checkbox"
+                checked={bypassGeoFilter}
+                onChange={(e) => setBypassGeoFilter(e.target.checked)}
+                className="mt-0.5 h-4 w-4 cursor-pointer rounded border-amber-400 text-amber-600 focus:ring-amber-500"
+              />
+              <div>
+                <label htmlFor="bypassGeo" className="text-xs font-semibold text-amber-800 cursor-pointer select-none">
+                  Aset Komersial — terima dari semua provinsi
+                </label>
+                <p className="text-xs text-amber-700 mt-0.5">
+                  Centang jika Hotel, Villa, Gudang, Pabrik, atau Lahan berasal dari luar Jawa Timur. Rumah &amp; Apartemen tetap difilter normal.
+                </p>
+              </div>
             </div>
 
             {/* ── JSON mode ── */}
