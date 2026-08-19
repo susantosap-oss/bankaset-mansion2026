@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Plus, Trash2, BookOpen, MapPin, CheckCircle, XCircle, Copy } from 'lucide-react';
+import { Plus, Trash2, BookOpen, MapPin, CheckCircle, XCircle, Copy, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
@@ -46,6 +46,12 @@ export default function NormalizationPage() {
   const [crmRemoving, setCrmRemoving] = useState(false);
   const [crmRemoved, setCrmRemoved]   = useState<number | null>(null);
   const [crmError, setCrmError]       = useState<string | null>(null);
+
+  const [syncNew, setSyncNew]         = useState<number | null>(null);
+  const [syncChecking, setSyncChecking] = useState(false);
+  const [syncRunning, setSyncRunning] = useState(false);
+  const [syncAdded, setSyncAdded]     = useState<number | null>(null);
+  const [syncError, setSyncError]     = useState<string | null>(null);
 
   async function handleBackfillCities() {
     if (!confirm('Normalisasi kota untuk semua asset yang belum memiliki data Kota?\n\nProses ini membaca kolom Alamat Lengkap dan mengisi Kota/Kecamatan secara otomatis.')) return;
@@ -134,6 +140,40 @@ export default function NormalizationPage() {
       setCrmError(e instanceof Error ? e.message : 'Gagal hapus duplikat CRM');
     } finally {
       setCrmRemoving(false);
+    }
+  }
+
+  async function handleSyncCheck() {
+    setSyncChecking(true);
+    setSyncNew(null);
+    setSyncAdded(null);
+    setSyncError(null);
+    try {
+      const res = await fetch('/api/admin/sync-crm');
+      const json = await res.json();
+      if (!res.ok || json.error) throw new Error(json.error?.message ?? `Error ${res.status}`);
+      setSyncNew(json.data.newAssets);
+    } catch (e) {
+      setSyncError(e instanceof Error ? e.message : 'Gagal cek aset baru');
+    } finally {
+      setSyncChecking(false);
+    }
+  }
+
+  async function handleSyncRun() {
+    if (!confirm(`Tambahkan ${syncNew} aset baru ke CRM?\n\nProses ini hanya menambah aset yang belum ada di CRM. Data yang sudah ada tidak diubah.`)) return;
+    setSyncRunning(true);
+    setSyncError(null);
+    try {
+      const res = await fetch('/api/admin/sync-crm', { method: 'POST' });
+      const json = await res.json();
+      if (!res.ok || json.error) throw new Error(json.error?.message ?? `Error ${res.status}`);
+      setSyncAdded(json.data.added);
+      setSyncNew(null);
+    } catch (e) {
+      setSyncError(e instanceof Error ? e.message : 'Gagal sync ke CRM');
+    } finally {
+      setSyncRunning(false);
     }
   }
 
@@ -306,6 +346,65 @@ export default function NormalizationPage() {
                   <Copy className="w-4 h-4 shrink-0" />
                   Ditemukan <strong>{dedupPreview.totalDuplicates}</strong> data kembar
                   dalam <strong>{dedupPreview.duplicateGroups}</strong> grup. Klik &quot;Hapus&quot; untuk membersihkan.
+                </div>
+              )
+            )}
+          </CardContent>
+        )}
+      </Card>
+
+      {/* ── Sync aset baru ke CRM ─────────────────────────────────── */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between flex-wrap gap-3">
+            <div>
+              <h3 className="font-semibold text-gray-800 flex items-center gap-2">
+                <RefreshCw className="w-4 h-4 text-blue-500" />
+                Sync Aset Baru ke CRM
+              </h3>
+              <p className="text-xs text-gray-500 mt-0.5">
+                Tambahkan aset yang belum ada di CRM. Data yang sudah ada tidak diubah.
+              </p>
+            </div>
+            <div className="flex gap-2">
+              <Button variant="secondary" onClick={handleSyncCheck} loading={syncChecking}>
+                <RefreshCw className="w-4 h-4" />
+                Cek Aset Baru
+              </Button>
+              {syncNew !== null && syncNew > 0 && (
+                <Button variant="primary" onClick={handleSyncRun} loading={syncRunning}>
+                  <Plus className="w-4 h-4" />
+                  Tambah {syncNew} ke CRM
+                </Button>
+              )}
+            </div>
+          </div>
+        </CardHeader>
+
+        {(syncNew !== null || syncAdded !== null || syncError) && (
+          <CardContent className="pt-0">
+            {syncError && (
+              <div className="flex items-center gap-2 text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-4 py-3">
+                <XCircle className="w-4 h-4 shrink-0" />
+                {syncError}
+              </div>
+            )}
+            {syncAdded !== null && (
+              <div className="flex items-center gap-2 text-sm text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-4 py-3">
+                <CheckCircle className="w-4 h-4 shrink-0" />
+                Selesai — <strong>{syncAdded}</strong> aset baru berhasil ditambahkan ke CRM.
+              </div>
+            )}
+            {syncNew !== null && syncAdded === null && (
+              syncNew === 0 ? (
+                <div className="flex items-center gap-2 text-sm text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-4 py-3">
+                  <CheckCircle className="w-4 h-4 shrink-0" />
+                  Semua aset sudah tersinkron di CRM.
+                </div>
+              ) : (
+                <div className="flex items-center gap-2 text-sm text-blue-700 bg-blue-50 border border-blue-200 rounded-lg px-4 py-3">
+                  <RefreshCw className="w-4 h-4 shrink-0" />
+                  <strong>{syncNew}</strong> aset belum ada di CRM. Klik &quot;Tambah&quot; untuk sync.
                 </div>
               )
             )}
