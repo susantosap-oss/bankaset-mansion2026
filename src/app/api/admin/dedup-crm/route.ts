@@ -5,10 +5,10 @@ import { getGoogleSheetClient } from '@/infrastructure/gsheet/GoogleSheetClient'
 export const maxDuration = 60;
 
 const CRM_SHEET_NAME = 'Assets';
-
-function rowKey(row: string[]): string {
-  return row.map((v) => (v ?? '').trim()).join('||');
-}
+// Kolom dedup: Source_Row_ID (col 29) = Asset ID dari Asset Engine
+const COL_SOURCE_ID  = 29;
+// Kolom tiebreaker: Updated_At (col 34) — simpan yang paling baru
+const COL_UPDATED_AT = 34;
 
 async function findCRMDuplicates() {
   const sheetId = process.env.CRM_SHEET_ID;
@@ -18,16 +18,25 @@ async function findCRMDuplicates() {
   const rows = await client.readSheet(sheetId, CRM_SHEET_NAME);
   if (rows.length < 2) return { rows, toDelete: [] };
 
-  const seen = new Map<string, number>(); // key → first row index (0-based, including header)
+  // Group by Source_Row_ID → simpan yang Updated_At terbesar (terbaru)
+  const groups = new Map<string, { rowIndex: number; updatedAt: string }>();
   const toDelete: number[] = [];
 
   for (let i = 1; i < rows.length; i++) {
-    const key = rowKey(rows[i]);
-    if (!key.replace(/\|/g, '').trim()) continue; // skip baris kosong
-    if (seen.has(key)) {
-      toDelete.push(i);
+    const sourceId = (rows[i][COL_SOURCE_ID] ?? '').trim();
+    if (!sourceId) continue; // skip baris tanpa Source_Row_ID
+    const updatedAt = (rows[i][COL_UPDATED_AT] ?? '').trim();
+
+    const existing = groups.get(sourceId);
+    if (!existing) {
+      groups.set(sourceId, { rowIndex: i, updatedAt });
+    } else if (updatedAt > existing.updatedAt) {
+      // Row baru lebih baru → buang row lama
+      toDelete.push(existing.rowIndex);
+      groups.set(sourceId, { rowIndex: i, updatedAt });
     } else {
-      seen.set(key, i);
+      // Row baru lebih lama → buang row baru
+      toDelete.push(i);
     }
   }
 
