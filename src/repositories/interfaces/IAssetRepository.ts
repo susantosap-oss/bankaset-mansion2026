@@ -67,6 +67,8 @@ export interface IAssetRepository {
   findActiveByBank(bankName: string): Promise<Asset[]>;
   /** Tandai aset sebagai SOLD (dianggap dihapus dari list bank). */
   bulkDisable(assetIds: string[]): Promise<number>;
+  /** Hapus fisik baris dari sheet (untuk dedup aset yang sudah SOLD). */
+  bulkPurge(assetIds: string[]): Promise<number>;
   /** Update field-field tertentu pada banyak aset sekaligus. */
   bulkUpdateFields(updates: Array<{ assetId: string; partial: Partial<CreateAssetInput> }>): Promise<number>;
 }

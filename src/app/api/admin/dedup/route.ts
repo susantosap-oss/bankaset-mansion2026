@@ -87,16 +87,20 @@ export async function POST(req: NextRequest) {
       return ok({ removed: 0, message: 'Tidak ada duplikat ditemukan.' });
     }
 
-    // Hanya nonaktifkan yang masih ACTIVE; yang sudah SOLD sudah tidak aktif
-    const idsToRemove = groups.flatMap((g) =>
-      g.remove.filter((a) => a.status === 'ACTIVE').map((a) => a.assetId)
-    );
-    const removed = await repo.bulkDisable(idsToRemove);
+    const allToRemove = groups.flatMap((g) => g.remove);
+    const activeIds  = allToRemove.filter((a) => a.status === 'ACTIVE').map((a) => a.assetId);
+    const soldIds    = allToRemove.filter((a) => a.status !== 'ACTIVE').map((a) => a.assetId);
+
+    const [disabled, purged] = await Promise.all([
+      repo.bulkDisable(activeIds),
+      repo.bulkPurge(soldIds),
+    ]);
+    const removed = disabled + purged;
 
     return ok({
       duplicateGroups: groups.length,
       removed,
-      message: `${removed} aset duplikat dihapus (di-nonaktifkan).`,
+      message: `${removed} aset duplikat dihapus (${disabled} dinonaktifkan, ${purged} dihapus fisik).`,
     });
   } catch (e) {
     console.error('[POST /api/admin/dedup]', e);

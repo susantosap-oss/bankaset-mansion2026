@@ -280,6 +280,20 @@ export class GoogleSheetAssetRepository implements IAssetRepository {
     return batchUpdates.length;
   }
 
+  async bulkPurge(assetIds: string[]): Promise<number> {
+    if (assetIds.length === 0) return 0;
+    const rows = await this.client.readSheet(this.spreadsheetId, SHEET_NAME);
+    const header = rows[0];
+    const idSet = new Set(assetIds);
+    let count = 0;
+    const kept = rows.slice(1).filter((row) => {
+      if (row[0] && idSet.has(row[0])) { count++; return false; }
+      return true;
+    });
+    await this.client.overwriteSheet(this.spreadsheetId, SHEET_NAME, [header, ...kept]);
+    return count;
+  }
+
   async bulkUpdateFields(updates: Array<{ assetId: string; partial: Partial<CreateAssetInput> }>): Promise<number> {
     if (updates.length === 0) return 0;
     const rows = await this.client.readSheet(this.spreadsheetId, SHEET_NAME);
