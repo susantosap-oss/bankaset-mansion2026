@@ -217,7 +217,7 @@ export default function NormalizationPage() {
               </h3>
               <p className="text-xs text-gray-500 mt-0.5">
                 Deteksi dan nonaktifkan aset duplikat berdasarkan bank + nama debitur + alamat.
-                Data yang lebih lama dipertahankan, sisanya dinonaktifkan.
+                Data terbaru dipertahankan, data lama dinonaktifkan.
               </p>
             </div>
             <div className="flex gap-2">

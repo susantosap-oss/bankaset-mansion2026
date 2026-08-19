@@ -15,9 +15,8 @@ async function findDuplicates() {
 
   const groups = new Map<string, typeof all>();
   for (const asset of all) {
-    if (asset.status === 'SOLD') continue; // skip yang sudah di-disable
     const key = deduplicateKey(asset.bankName, asset.debtorName, asset.address);
-    if (!key.includes('||') || key.endsWith('||')) continue; // skip aset tanpa address & debtorName
+    if (key.endsWith('||')) continue; // skip aset tanpa address & debtorName
     const group = groups.get(key) ?? [];
     group.push(asset);
     groups.set(key, group);
@@ -31,8 +30,13 @@ async function findDuplicates() {
 
   for (const [key, group] of groups) {
     if (group.length < 2) continue;
-    // Urutkan: simpan yang paling lama (createdAt terkecil), hapus sisanya
-    group.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+    // Urutkan: ACTIVE didahulukan, lalu yang paling baru (updatedAt terbesar)
+    group.sort((a, b) => {
+      const statusScore = (s: string) => (s === 'ACTIVE' ? 0 : 1);
+      const sd = statusScore(a.status) - statusScore(b.status);
+      if (sd !== 0) return sd;
+      return b.updatedAt.localeCompare(a.updatedAt);
+    });
     duplicateGroups.push({ key, keep: group[0], remove: group.slice(1) });
   }
 
@@ -83,7 +87,10 @@ export async function POST(req: NextRequest) {
       return ok({ removed: 0, message: 'Tidak ada duplikat ditemukan.' });
     }
 
-    const idsToRemove = groups.flatMap((g) => g.remove.map((a) => a.assetId));
+    // Hanya nonaktifkan yang masih ACTIVE; yang sudah SOLD sudah tidak aktif
+    const idsToRemove = groups.flatMap((g) =>
+      g.remove.filter((a) => a.status === 'ACTIVE').map((a) => a.assetId)
+    );
     const removed = await repo.bulkDisable(idsToRemove);
 
     return ok({
